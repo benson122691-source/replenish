@@ -16,14 +16,14 @@
 | TC-10 | FR-5、AC-2.2 | 設定 MOQ，需補貨時補貨量 ≥ MOQ | 成立 | 通過（`test_order_respects_moq_and_is_integer`） |
 | TC-11 | FR-5、BR-3 | 補貨量為整數、≥ 0 | 成立 | 通過（同上） |
 | TC-12 | FR-6、M-2 | 模擬成本：模型 vs 基準 | 產出比較表 | 通過（合成資料）：LightGBM 總成本比移動平均低 19.6%；四種缺貨成本假設下排名不變；見 docs/results.md。真實 M5 待驗證 |
-| TC-13 | FR-7 | 有效品項回 28 筆預測 | 200、28 筆 | 未執行 |
-| TC-14 | FR-7、BR-1 | 不存在品項 | 404 | 未執行 |
-| TC-15 | FR-8、BR-4 | 服務水準 = 1.2 或庫存 = −5 | 422 | 未執行 |
-| TC-16 | FR-8 | 正常補貨請求 | 200，含補貨點與補貨量 | 未執行 |
-| TC-17 | FR-9、NFR-5 | /compare 含 data_source | 欄位存在 | 未執行 |
+| TC-13 | FR-7 | 有效品項回 28 筆預測 | 200、28 筆 | 通過（`test_forecast_returns_28_days_from_artifacts`，2026-11-09；並比對值等於 artifacts/holdout_forecasts.csv） |
+| TC-14 | FR-7、BR-1 | 不存在品項 | 404 | 通過（`test_forecast_unknown_item_or_store_is_404`：品項與門市各一例，訊息含欄位名） |
+| TC-15 | FR-8、BR-4 | 服務水準 = 1.2 或庫存 = −5 | 422 | 通過（`test_replenish_rejects_invalid_input`：另含 SL=0.4、交期 0/29、MOQ=−1） |
+| TC-16 | FR-8 | 正常補貨請求 | 200，含補貨點與補貨量 | 通過（`test_replenish_matches_policy_formula`：以 artifacts 獨立重算 ROP 與補貨量並比對；另有庫存充足=0、MOQ 測試） |
+| TC-17 | FR-9、NFR-5 | /compare 含 data_source | 欄位存在 | 通過（`test_compare_returns_artifact_numbers_and_data_source`：每個數字等於 artifacts/results.json；`test_synthetic_results_are_labelled`） |
 | TC-18 | FR-10 | 無痕視窗開頁、選品項、看到圖與建議、重新整理後正常 | 可操作 | 未執行 |
 | TC-19 | NFR-1 | 同設定重跑兩次 | 指標一致 | 通過（`test_lgbm_is_reproducible`；僅測 LightGBM 預測） |
-| TC-20 | NFR-3 | 單品項預測 API p95 | < 1 秒 | 未執行（測量方式待確認） |
+| TC-20 | NFR-3 | 單品項預測 API p95 | < 1 秒 | 部分：本機 uvicorn、同一品項連續 200 次 GET /forecast，p95 ≈ 5 ms（2026-11-09，手動量測，非自動測試）；雲端未測 |
 | TC-21 | NFR-4 | 提交前搜尋 Repo 的金鑰與 .env | 無 | 未執行 |
 | TC-22 | NFR-6 | `docker compose up` 後可開頁面 | 成功 | 未執行 |
 

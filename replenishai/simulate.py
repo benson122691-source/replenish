@@ -70,12 +70,22 @@ def simulate_series(
     }
 
 
+def series_stats(train: pd.DataFrame, window: int = 56) -> pd.DataFrame:
+    """Per-series sigma (std of the last `window` training days) and last known price.
+    Shared by the simulation and the API so both use exactly the same sigma."""
+    g = train.sort_values("date").groupby("id")
+    return pd.DataFrame({
+        "sigma": g["sales"].apply(lambda s: s.tail(window).std(ddof=0)),
+        "price": g["sell_price"].last(),
+    })
+
+
 def simulate_strategy(
     test: pd.DataFrame, pred: pd.DataFrame, train: pd.DataFrame, **kw,
 ) -> dict:
     """Run every series in the hold-out for one forecast; return totals across series."""
-    sigma = train.sort_values("date").groupby("id")["sales"].apply(lambda s: s.tail(56).std(ddof=0))
-    price = train.sort_values("date").groupby("id")["sell_price"].last()
+    stats = series_stats(train)
+    sigma, price = stats["sigma"], stats["price"]
     m = test[["id", "date", "sales"]].merge(pred, on=["id", "date"]).sort_values(["id", "date"])
     rows = []
     for sid, g in m.groupby("id"):

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +23,7 @@ from replenishai.baselines import moving_average, score, seasonal_naive
 from replenishai.data import HORIZON, data_source, load_m5
 from replenishai.features import add_features
 from replenishai.models import predict_lgbm, train_lgbm
-from replenishai.simulate import CostParams, simulate_strategy
+from replenishai.simulate import CostParams, series_stats, simulate_strategy
 from replenishai.synthetic import make_synthetic_m5
 
 RAW = ROOT / "data" / "raw"
@@ -79,6 +80,9 @@ def main() -> None:
                 out = out.merge(p.rename(columns={"pred": f"pred_{name}"}), on=["id", "date"])
             (ROOT / "artifacts").mkdir(exist_ok=True)
             out.to_csv(ROOT / "artifacts" / "holdout_forecasts.csv", index=False)
+            # sigma/price per series at this origin: the API's /replenish needs them (M3)
+            series_stats(train).rename_axis("id").reset_index().to_csv(
+                ROOT / "artifacts" / "series_stats.csv", index=False)
         print(f"origin {origin.date()} done")
 
     acc = pd.DataFrame(acc_rows).groupby("strategy")[["rmse", "mae", "bias", "rmsse"]].mean().loc[STRATEGIES]
@@ -96,6 +100,7 @@ def main() -> None:
 
     results = {"data_source": source, "origins": [str(o.date()) for o in origins],
                "lead_time": args.lead_time, "service_level": args.service_level,
+               "cost_params": asdict(CostParams()),   # ASSUMED values, see simulate.CostParams
                "accuracy": acc.round(4).to_dict("index"), "cost": cost.round(3).to_dict("index"),
                "sensitivity": sens.round(2).reset_index().to_dict("records")}
     (ROOT / "artifacts").mkdir(exist_ok=True)
