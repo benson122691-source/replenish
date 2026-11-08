@@ -52,6 +52,11 @@ def load_m5(
     return long
 
 
+def data_source(raw_dir: str | Path) -> str:
+    """'synthetic' when the folder carries the generator's marker, else 'm5'."""
+    return "synthetic" if (Path(raw_dir) / "SYNTHETIC.txt").exists() else "m5"
+
+
 def split_train_test(df: pd.DataFrame, horizon: int = HORIZON):
     """Hold out the last `horizon` days. Returns (train, test, origin_date)."""
     last = df["date"].max()
