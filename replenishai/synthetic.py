@@ -1,0 +1,106 @@
+"""Synthetic data in the exact M5 (Walmart) file format.
+
+WHY: the real M5 data lives on Kaggle. This generator writes the same three files
+(calendar.csv, sell_prices.csv, sales_train_evaluation.csv) so the whole pipeline can be
+developed and tested offline. Put the real M5 files in the same folder to run on real data.
+
+Results produced from this data are SYNTHETIC and must be labelled as such.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+EVENTS = [  # (month, day, name, type)
+    (1, 1, "NewYear", "National"),
+    (2, 14, "ValentinesDay", "Cultural"),
+    (7, 4, "IndependenceDay", "National"),
+    (10, 31, "Halloween", "Cultural"),
+    (11, 25, "Thanksgiving", "National"),
+    (12, 25, "Christmas", "National"),
+]
+WEEKDAY_FACTOR = {0: 0.90, 1: 0.80, 2: 0.85, 3: 0.90, 4: 1.00, 5: 1.25, 6: 1.30}  # Mon..Sun
+DEPTS = ["FOODS_1", "HOBBIES_1", "HOUSEHOLD_1"]
+
+
+def make_synthetic_m5(
+    out_dir: str | Path,
+    n_items_per_dept: int = 20,
+    stores: tuple[str, ...] = ("CA_1", "CA_2"),
+    n_days: int = 1000,
+    start: str = "2022-01-01",
+    seed: int = 42,
+) -> Path:
+    rng = np.random.default_rng(seed)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    # ---- calendar.csv --------------------------------------------------------
+    dates = pd.date_range(start, periods=n_days, freq="D")
+    cal = pd.DataFrame({"d": [f"d_{i + 1}" for i in range(n_days)], "date": dates})
+    cal["wm_yr_wk"] = 11101 + np.arange(n_days) // 7
+    cal["weekday"] = cal["date"].dt.day_name()
+    cal["wday"] = (cal["date"].dt.dayofweek + 2 - 1) % 7 + 1  # M5 convention: Saturday = 1
+    cal["month"] = cal["date"].dt.month
+    cal["year"] = cal["date"].dt.year
+    cal["event_name_1"] = None
+    cal["event_type_1"] = None
+    for m, d, name, typ in EVENTS:
+        mask = (cal["date"].dt.month == m) & (cal["date"].dt.day == d)
+        cal.loc[mask, "event_name_1"] = name
+        cal.loc[mask, "event_type_1"] = typ
+    states = sorted({s.split("_")[0] for s in stores})
+    for st in states:  # SNAP-like benefit days: first 10 days of each month
+        cal[f"snap_{st}"] = (cal["date"].dt.day <= 10).astype(int)
+    cal.to_csv(out / "calendar.csv", index=False)
+
+    # ---- item master ---------------------------------------------------------
+    items = []
+    for dept in DEPTS:
+        cat = dept.split("_")[0]
+        for k in range(1, n_items_per_dept + 1):
+            items.append({
+                "item_id": f"{dept}_{k:03d}", "dept_id": dept, "cat_id": cat,
+                "base_rate": float(np.exp(rng.normal(0.8, 0.9))),   # mean daily demand
+                "base_price": float(np.round(np.exp(rng.normal(1.2, 0.6)), 2)),
+                "phase": float(rng.uniform(0, 2 * np.pi)),
+                "trend": float(rng.normal(0, 0.0002)),
+            })
+
+    # ---- sell_prices.csv + sales (wide) --------------------------------------
+    n_weeks = int(cal["wm_yr_wk"].nunique())
+    weeks = np.sort(cal["wm_yr_wk"].unique())
+    doy = cal["date"].dt.dayofyear.to_numpy()
+    wd = cal["date"].dt.dayofweek.map(WEEKDAY_FACTOR).to_numpy()
+    event_flag = cal["event_name_1"].notna().to_numpy()
+    price_rows, sales_rows = [], []
+    for store in stores:
+        state = store.split("_")[0]
+        snap = cal[f"snap_{state}"].to_numpy()
+        for it in items:
+            promo = rng.random(n_weeks) < 0.12                 # ~12% of weeks on promotion
+            price_w = np.round(it["base_price"] * np.where(promo, 0.8, 1.0), 2)
+            price_rows.append(pd.DataFrame({
+                "store_id": store, "item_id": it["item_id"],
+                "wm_yr_wk": weeks, "sell_price": price_w}))
+            price_d = np.repeat(price_w, 7)[:n_days]
+            ratio = price_d / it["base_price"]
+            store_factor = 1.0 if store.endswith("1") else 0.8
+            lam = (it["base_rate"] * store_factor * wd
+                   * (1 + 0.15 * np.sin(2 * np.pi * doy / 365 + it["phase"]))
+                   * (1 + it["trend"] * np.arange(n_days))
+                   * np.where(event_flag, 1.5, 1.0)
+                   * np.where((it["cat_id"] == "FOODS") & (snap == 1), 1.10, 1.0)
+                   * ratio ** -1.5)
+            sales = rng.poisson(np.clip(lam, 0, None))
+            row = {"id": f"{it['item_id']}_{store}_evaluation", "item_id": it["item_id"],
+                   "dept_id": it["dept_id"], "cat_id": it["cat_id"],
+                   "store_id": store, "state_id": state}
+            row.update({f"d_{i + 1}": int(v) for i, v in enumerate(sales)})
+            sales_rows.append(row)
+
+    pd.concat(price_rows, ignore_index=True).to_csv(out / "sell_prices.csv", index=False)
+    pd.DataFrame(sales_rows).to_csv(out / "sales_train_evaluation.csv", index=False)
+    return out
