@@ -1,0 +1,10 @@
+pandas
+numpy
+scikit-learn
+lightgbm
+matplotlib
+fastapi
+uvicorn
+sqlalchemy
+httpx
+pytest

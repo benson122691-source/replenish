@@ -1,0 +1,18 @@
+{
+  "project": "ReplenishAI",
+  "timezone": "Asia/Taipei",
+  "milestones": [
+    {"id": "M0", "due": "2026-11-08", "title": "Project skeleton + git monitor",
+     "deliverables": ["schedule.json", "scripts/git_monitor.py", "requirements.txt"]},
+    {"id": "M1", "due": "2026-11-08", "title": "Data pipeline + baseline models",
+     "deliverables": ["replenishai/data.py", "replenishai/features.py", "replenishai/baselines.py", "tests/test_pipeline.py"]},
+    {"id": "M2", "due": "2026-11-09", "title": "LightGBM + replenishment cost simulation",
+     "deliverables": ["replenishai/models.py", "replenishai/policy.py", "scripts/run_experiment.py"]},
+    {"id": "M3", "due": "2026-11-10", "title": "FastAPI service + tests",
+     "deliverables": ["replenishai/api.py", "tests/test_api.py"]},
+    {"id": "M4", "due": "2026-11-11", "title": "HTML dashboard + Docker",
+     "deliverables": ["static/index.html", "Dockerfile", "docker-compose.yml"]},
+    {"id": "M5", "due": "2026-11-12", "title": "README with real results + push to GitHub",
+     "deliverables": ["README.md", "docs/results.md"]}
+  ]
+}
