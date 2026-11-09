@@ -80,17 +80,38 @@ def series_stats(train: pd.DataFrame, window: int = 56) -> pd.DataFrame:
     })
 
 
-def simulate_strategy(
-    test: pd.DataFrame, pred: pd.DataFrame, train: pd.DataFrame, **kw,
-) -> dict:
-    """Run every series in the hold-out for one forecast; return totals across series."""
+def simulate_per_series(
+    test: pd.DataFrame, pred: pd.DataFrame, train: pd.DataFrame, sigma_scale: float = 1.0, **kw,
+) -> pd.DataFrame:
+    """One row per series. sigma_scale=0 turns the safety-stock term off (used when `pred` is
+    already a high quantile that carries the safety margin itself)."""
     stats = series_stats(train)
     sigma, price = stats["sigma"], stats["price"]
     m = test[["id", "date", "sales"]].merge(pred, on=["id", "date"]).sort_values(["id", "date"])
     rows = []
     for sid, g in m.groupby("id"):
-        rows.append(simulate_series(g["sales"].to_numpy(), g["pred"].to_numpy(),
-                                    float(sigma.get(sid, 0.0)), float(price[sid]), **kw))
-    df = pd.DataFrame(rows)
+        r = simulate_series(g["sales"].to_numpy(), g["pred"].to_numpy(),
+                            float(sigma.get(sid, 0.0)) * sigma_scale, float(price[sid]), **kw)
+        rows.append({"id": sid, **r})
+    return pd.DataFrame(rows)
+
+
+def simulate_strategy(
+    test: pd.DataFrame, pred: pd.DataFrame, train: pd.DataFrame, **kw,
+) -> dict:
+    """Run every series in the hold-out for one forecast; return totals across series."""
+    df = simulate_per_series(test, pred, train, **kw)
     tot = df[["stockout_units", "holding_cost", "stockout_cost", "total_cost", "demand"]].sum()
     return {**tot.to_dict(), "fill_rate": float(1 - tot["stockout_units"] / tot["demand"])}
+
+
+def paired_bootstrap_ci(a: pd.Series, b: pd.Series, n: int = 2000, seed: int = 0) -> dict:
+    """Series-level paired bootstrap of total(a) / total(b) - 1. `a`,`b` are per-series costs
+    (same index). Tells us whether an apparent saving is distinguishable from noise."""
+    a, b = a.align(b, join="inner")
+    rng = np.random.default_rng(seed)
+    av, bv = a.to_numpy(), b.to_numpy()
+    idx = rng.integers(0, len(av), size=(n, len(av)))
+    ratio = av[idx].sum(axis=1) / bv[idx].sum(axis=1) - 1
+    lo, hi = np.percentile(ratio, [2.5, 97.5])
+    return {"pct": float((av.sum() / bv.sum() - 1) * 100), "lo": float(lo * 100), "hi": float(hi * 100)}

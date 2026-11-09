@@ -31,3 +31,9 @@ def predict_lgbm(model: lgb.LGBMRegressor, test: pd.DataFrame) -> pd.DataFrame:
     """Forecast for every test row; negative values are clipped to 0 (BR-2)."""
     pred = np.clip(model.predict(test[FEATURES]), 0, None)
     return pd.DataFrame({"id": test["id"].values, "date": test["date"].values, "pred": pred})
+
+
+def train_lgbm_quantile(train: pd.DataFrame, alpha: float, params: dict | None = None) -> lgb.LGBMRegressor:
+    """Daily-demand quantile model. Used as a risk-aware order-up-to input instead of mean + z*sigma
+    (which assumes normal demand; real retail demand is skewed and has many zeros)."""
+    return train_lgbm(train, {"objective": "quantile", "alpha": alpha, **(params or {})})

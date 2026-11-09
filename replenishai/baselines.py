@@ -28,6 +28,24 @@ def moving_average(train: pd.DataFrame, test: pd.DataFrame, window: int = 28) ->
     return test[["id", "date"]].merge(mean, on="id", how="left")
 
 
+def tsb(train: pd.DataFrame, test: pd.DataFrame, alpha: float = 0.1, beta: float = 0.1) -> pd.DataFrame:
+    """Teunter-Syntetos-Babai: flat forecast = P(demand>0) x mean size of non-zero demand, both
+    exponentially smoothed. The standard baseline for intermittent (many-zero) retail demand."""
+    rows = []
+    for sid, g in train.sort_values("date").groupby("id"):
+        y = g["sales"].to_numpy()
+        nz = y[y > 0]
+        prob = float((y[:28] > 0).mean()) if len(y) else 0.0
+        size = float(nz[0]) if len(nz) else 0.0
+        for v in y:
+            if v > 0:
+                size += alpha * (v - size) if size > 0 else v - size
+            prob += beta * ((v > 0) - prob)
+        rows.append((sid, prob * size))
+    f = pd.DataFrame(rows, columns=["id", "pred"])
+    return test[["id", "date"]].merge(f, on="id", how="left")
+
+
 def score(test: pd.DataFrame, pred: pd.DataFrame, train: pd.DataFrame) -> dict:
     """RMSE / MAE / bias on the hold-out, plus RMSSE (error scaled by naive one-step error,
     the M5-style scale-free metric: <1 means better than 'tomorrow = today')."""
