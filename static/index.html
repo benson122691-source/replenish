@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReplenishAI 補貨助理</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --ink:#1d1d1b; --mute:#6b6b66; --line:#e3e3df; --accent:#2a6fdb; --warn:#fff3cd; --warnink:#7a5b00; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --card:#201f1e; --ink:#ecebe8; --mute:#a3a29c; --line:#34332f; --accent:#6ea2f5; --warn:#3a3217; --warnink:#f0d889; } }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,"Noto Sans TC",sans-serif; }
+  main { max-width:960px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin:0 0 4px; } h2 { font-size:1.05rem; margin:0 0 10px; }
+  .banner { background:var(--warn); color:var(--warnink); padding:10px 14px; border-radius:8px; margin:12px 0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin:14px 0; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
+  label { display:flex; flex-direction:column; font-size:.85rem; color:var(--mute); gap:4px; }
+  select,input,button { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
+  button { background:var(--accent); color:#fff; border:0; cursor:pointer; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; } th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:right; } th:first-child,td:first-child { text-align:left; }
+  .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; } .kv div { background:var(--bg); border-radius:8px; padding:10px; } .kv b { display:block; font-size:1.2rem; }
+  .mute { color:var(--mute); font-size:.85rem; } .err { color:#c0392b; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ReplenishAI 補貨助理</h1>
+  <div class="mute">預測未來 28 天銷量，並換算成「現在該補多少貨」。</div>
+  <div id="banner" class="banner">載入中…</div>
+
+  <section class="card">
+    <h2>1. 預測（回測：與實際銷量對照）</h2>
+    <div class="row">
+      <label>門市<select id="store"></select></label>
+      <label>品項<select id="item"></select></label>
+    </div>
+    <canvas id="chart" height="110" style="margin-top:12px"></canvas>
+    <div id="fmsg" class="mute"></div>
+  </section>
+
+  <section class="card">
+    <h2>2. 補貨建議</h2>
+    <div class="row">
+      <label>目前庫存<input id="onhand" type="number" min="0" value="10"></label>
+      <label>交期（天）<input id="lead" type="number" min="1" max="28" value="7"></label>
+      <label>服務水準<input id="sl" type="number" min="0.5" max="0.999" step="0.01" value="0.95"></label>
+      <label>最小訂購量 MOQ<input id="moq" type="number" min="0" value="0"></label>
+      <button id="go">計算</button>
+    </div>
+    <div id="rep" class="kv" style="margin-top:12px"></div>
+    <div id="rmsg" class="mute"></div>
+  </section>
+
+  <section class="card">
+    <h2>3. 策略成本比較</h2>
+    <div class="scroll"><table id="cmp"></table></div>
+    <div id="cnote" class="mute" style="margin-top:8px"></div>
+    <h2 style="margin-top:16px">與 moving_avg_28 的成本差異（95% 信賴區間）</h2>
+    <div class="scroll"><table id="boot"></table></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let chart, seriesInfo;
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail || r.status));
+  return j;
+}
+const fmt = (x, d = 2) => (x == null ? "–" : Number(x).toFixed(d));
+function fillItems() {
+  $("item").innerHTML = seriesInfo.items_by_store[$("store").value].map(i => `<option>${i}</option>`).join("");
+}
+async function loadForecast() {
+  $("fmsg").textContent = ""; $("fmsg").className = "mute";
+  try {
+    const f = await api(`/forecast?item_id=${encodeURIComponent($("item").value)}&store_id=${encodeURIComponent($("store").value)}`);
+    const data = {
+      labels: f.forecast.map(p => p.date.slice(5)),
+      datasets: [
+        { label: "預測 (LightGBM)", data: f.forecast.map(p => p.pred), borderColor: "#2a6fdb", tension: .2 },
+        { label: "實際銷量", data: f.forecast.map(p => p.actual), borderColor: "#e08a1e", borderDash: [5, 4], tension: .2 },
+      ],
+    };
+    if (chart) chart.destroy();
+    chart = new Chart($("chart"), { type: "line", data, options: { responsive: true, interaction: { mode: "index", intersect: false } } });
+    $("fmsg").textContent = `預測起點 ${f.forecast_origin}；這是回測，不是未來預測。`;
+  } catch (e) { $("fmsg").textContent = e.message; $("fmsg").className = "err"; }
+}
+async function calc() {
+  $("rmsg").textContent = ""; $("rmsg").className = "mute";
+  try {
+    const body = { item_id: $("item").value, store_id: $("store").value, on_hand: +$("onhand").value,
+                   lead_time_days: +$("lead").value, service_level: +$("sl").value, moq: +$("moq").value };
+    const r = await api("/replenish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    $("rep").innerHTML = [["建議補貨量", r.order_qty], ["再訂購點", fmt(r.reorder_point)], ["安全庫存", fmt(r.safety_stock)],
+                          ["預測日均需求 μ", fmt(r.mu_daily)], ["需求標準差 σ", fmt(r.sigma_daily)]]
+      .map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
+    $("rmsg").textContent = r.order_qty === 0 ? "庫存高於再訂購點，目前不需補貨。" : "";
+  } catch (e) { $("rmsg").textContent = e.message; $("rmsg").className = "err"; }
+}
+async function loadCompare() {
+  const c = await api("/compare");
+  const rows = c.strategies.map(s => `<tr><td>${s.name}</td><td>${fmt(s.total_cost, 1)}</td><td>${fmt(s.holding_cost, 1)}</td><td>${fmt(s.stockout_cost, 1)}</td><td>${fmt(s.fill_rate * 100, 1)}%</td><td>${fmt(s.rmsse, 3)}</td></tr>`);
+  $("cmp").innerHTML = `<tr><th>策略</th><th>總成本</th><th>持有</th><th>缺貨</th><th>滿足率</th><th>RMSSE</th></tr>` + rows.join("");
+  $("cnote").textContent = `${c.cost_params_note} 交期 ${c.lead_time_days} 天、服務水準 ${c.service_level}。oracle＝完美預測（成本下界）。`;
+  const b = Object.entries(c.bootstrap_vs_baseline || {}).map(([k, v]) =>
+    `<tr><td>${k}</td><td>${v.pct >= 0 ? "+" : ""}${fmt(v.pct, 1)}%</td><td>[${fmt(v.lo, 1)}, ${fmt(v.hi, 1)}]</td><td>${v.lo > 0 || v.hi < 0 ? "是" : "否"}</td></tr>`);
+  $("boot").innerHTML = `<tr><th>策略</th><th>成本變化</th><th>95% CI (%)</th><th>顯著？</th></tr>` + b.join("");
+}
+(async () => {
+  try {
+    const h = await api("/health");
+    $("banner").textContent = h.data_note + `（${h.n_series} 條序列，預測起點 ${h.forecast_origin}）`;
+    seriesInfo = await api("/series");
+    $("store").innerHTML = seriesInfo.stores.map(s => `<option>${s}</option>`).join("");
+    fillItems();
+    $("store").onchange = () => { fillItems(); loadForecast(); };
+    $("item").onchange = loadForecast;
+    $("go").onclick = calc;
+    await Promise.all([loadForecast(), loadCompare()]);
+    calc();
+  } catch (e) { $("banner").textContent = "載入失敗：" + e.message; }
+})();
+</script>
+</body>
+</html>

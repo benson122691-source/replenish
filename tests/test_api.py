@@ -182,3 +182,18 @@ def test_app_refuses_to_start_without_artifacts(tmp_path):  # docs/04-sad.md fai
     with pytest.raises(RuntimeError, match="run_experiment.py"):
         with TestClient(create_app(tmp_path)):
             pass
+
+
+@needs_artifacts
+def test_series_lists_every_store_and_item(client, forecasts):  # dashboard dropdowns
+    j = client.get("/series").json()
+    assert set(j["stores"]) == set(forecasts["store_id"])
+    st = j["stores"][0]
+    assert set(j["items_by_store"][st]) == set(forecasts.loc[forecasts["store_id"] == st, "item_id"])
+
+
+@needs_artifacts
+def test_index_page_is_served_and_compare_carries_bootstrap(client):
+    r = client.get("/")
+    assert r.status_code == 200 and "ReplenishAI" in r.text
+    assert "bootstrap_vs_baseline" in client.get("/compare").json()

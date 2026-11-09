@@ -22,12 +22,14 @@ from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .data import HORIZON
 from .policy import order_quantity, reorder_point, z_from_service_level
 
 ROOT = Path(__file__).resolve().parent.parent
+STATIC_INDEX = ROOT / "static" / "index.html"
 ARTIFACTS_ENV = "REPLENISHAI_ARTIFACTS"          # override the folder (used by tests / Docker)
 REQUIRED_FILES = ("results.json", "holdout_forecasts.csv", "series_stats.csv")
 MODEL = "lightgbm"                               # the model whose forecast the API serves
@@ -150,6 +152,19 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
         return {"status": "ok", **source_fields(a), "forecast_origin": a.origin,
                 "n_series": int(a.forecasts["id"].nunique())}
 
+    @app.get("/", include_in_schema=False)
+    def index():
+        """The one-page dashboard (static/index.html); it only calls the JSON endpoints below."""
+        return FileResponse(STATIC_INDEX)
+
+    @app.get("/series")
+    def series(request: Request) -> dict:
+        """Items and stores that exist in the served forecast (fills the dashboard dropdowns)."""
+        f = art(request).forecasts
+        pairs = f[["item_id", "store_id"]].drop_duplicates()
+        return {"stores": sorted(pairs["store_id"].unique()),
+                "items_by_store": {st: sorted(g["item_id"]) for st, g in pairs.groupby("store_id")}}
+
     @app.get("/forecast", response_model=ForecastResponse)
     def forecast(item_id: str, store_id: str, request: Request):
         """FR-7: the 28-day LightGBM forecast of one item in one store."""
@@ -193,6 +208,7 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
             "cost_params_note": "假設值（待確認）：M5 沒有真實成本資料。",
             "baseline": BASELINE, "strategies": strategies,
             "sensitivity": r.get("sensitivity", []),
+            "bootstrap_vs_baseline": r.get("bootstrap_vs_ma28", {}),
         }
 
     return app
