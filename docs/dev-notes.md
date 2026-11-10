@@ -45,5 +45,5 @@
 ## 投稿資訊
 
 - Demo 網址：待補（未部署則附操作影片，並註明「未完成雲端部署」）
-- Repo：待補
+- Repo：https://github.com/benson122691-source/replenish
 - 測試證據：docs/06-test-plan.md、docs/results.md
