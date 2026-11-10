@@ -22,12 +22,14 @@ from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .data import HORIZON
 from .policy import order_quantity, reorder_point, z_from_service_level
 
 ROOT = Path(__file__).resolve().parent.parent
+STATIC = ROOT / "static"
 ARTIFACTS_ENV = "REPLENISHAI_ARTIFACTS"          # override the folder (used by tests / Docker)
 REQUIRED_FILES = ("results.json", "holdout_forecasts.csv", "series_stats.csv")
 MODEL = "lightgbm"                               # the model whose forecast the API serves
@@ -122,7 +124,7 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
         app.state.art = load_artifacts(folder)     # fails fast if the experiment was not run
         yield
 
-    app = FastAPI(title="ReplenishAI", version="0.3.0", lifespan=lifespan,
+    app = FastAPI(title="ReplenishAI", version="0.4.0", lifespan=lifespan,
                   description="Demand forecast + replenishment decision API. "
                               "Check `data_source` in every response.")
 
@@ -149,6 +151,21 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
         a = art(request)
         return {"status": "ok", **source_fields(a), "forecast_origin": a.origin,
                 "n_series": int(a.forecasts["id"].nunique())}
+
+    @app.get("/", include_in_schema=False)
+    def index():
+        """FR-10: the dashboard page, served by the same app (one service, no CORS)."""
+        return FileResponse(STATIC / "index.html")
+
+    @app.get("/series")
+    def series(request: Request) -> dict:
+        """Stores and items available in the artifacts (fills the dashboard's dropdowns)."""
+        a = art(request)
+        pairs = a.forecasts[["store_id", "item_id"]].drop_duplicates()
+        return {**source_fields(a),
+                "stores": sorted(pairs["store_id"].unique().tolist()),
+                "items_by_store": {s: sorted(g["item_id"].tolist())
+                                   for s, g in pairs.groupby("store_id")}}
 
     @app.get("/forecast", response_model=ForecastResponse)
     def forecast(item_id: str, store_id: str, request: Request):
