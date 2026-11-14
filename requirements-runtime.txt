@@ -1,0 +1,13 @@
+# What the Docker image needs to run scripts/run_experiment.py and the API.
+# Pinned to the versions the local test suite passed with (Python 3.12).
+# Dev/test tools (pytest, httpx, matplotlib, ...) stay in requirements.txt.
+numpy==2.5.3
+pandas==3.0.6
+scipy==1.18.1
+lightgbm==4.7.0
+scikit-learn==1.9.1   # lightgbm.LGBMRegressor (sklearn API) needs it at runtime
+tabulate==0.10.0
+fastapi==0.162.2
+pydantic==2.14.3
+starlette==1.10.0
+uvicorn==0.54.0

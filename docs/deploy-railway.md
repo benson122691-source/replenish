@@ -29,9 +29,10 @@
 ## 要在 M3、M4 補上的東西（部署前置）
 
 - `GET /health` 回 200（M3）。
-- 程式監聽環境變數 `PORT`（Dockerfile 的 CMD 使用 `${PORT:-8000}`）（M4）。
-- 建置時執行 `python scripts/run_experiment.py` 以產生 `artifacts/`（因為 artifacts 被 .gitignore 排除）（M4）。
-- 建置時間與記憶體：LightGBM 訓練約 20 秒（本機合成資料量），Railway 上實際數字待確認。
+- 程式監聽環境變數 `PORT`（Dockerfile 的 CMD 使用 `${PORT:-8000}`）（M4，已加入）。
+- 建置時執行 `python scripts/run_experiment.py` 以產生 `artifacts/`（因為 artifacts 被 .gitignore 排除）（M4，已加入）。
+- 建置時間與記憶體：本機乾淨 venv 模擬，實驗約 13 秒；Railway 上實際數字待確認。
+- 注意：開發機沒有 Docker，Dockerfile 尚未實際 build 過；第一次在 Railway 建置時要看建置日誌。
 
 ## 失敗時的備案（指南 4 節第 6 點）
 

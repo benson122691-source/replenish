@@ -21,6 +21,14 @@ uvicorn replenishai.api:app             # 開 http://127.0.0.1:8000/  （API 文
 python -m pytest -q
 ```
 
+### 用 Docker
+```bash
+docker compose up --build               # 開 http://127.0.0.1:8000/
+```
+- 建置時會在映像檔內跑 `scripts/run_experiment.py`（合成資料，約 15 秒）產生 `artifacts/`，執行時不訓練模型。
+- 監聽環境變數 `PORT`（預設 8000），可直接用於 Railway 等平台；內建 `/health` 健康檢查。
+- 映像檔只安裝 `requirements-runtime.txt`（固定版本）；測試工具留在 `requirements.txt`。
+
 ### 用真實 M5 重跑（建議的下一步）
 1. 到 Kaggle 的 M5 Forecasting - Accuracy 頁面接受規則，下載 `calendar.csv`、`sell_prices.csv`、`sales_train_evaluation.csv`。
 2. 放進 `data/raw/`，並刪掉 `data/raw/SYNTHETIC.txt`。
@@ -33,7 +41,8 @@ python -m pytest -q
 - TSB 比移動平均差：這份資料零值不多，不算間歇需求。
 
 ## 已知限制
-- 真實 M5、爬蟲（外部特徵）、LLM 助理、Docker／雲端部署尚未完成。
+- 真實 M5、爬蟲（外部特徵）、LLM 助理、雲端部署尚未完成。
+- Dockerfile 的建置步驟已在乾淨的 Python 3.12 venv 中逐步模擬驗證（實驗、全部端點、健康檢查），但開發機沒有 Docker，**尚未實際 `docker build`**。
 - 起始庫存、σ 的估計方式簡化；沒有訂購成本，在途量初始值為 0。
 - 儀表板的 JavaScript 只驗證了後端端點，尚未在瀏覽器實際操作截圖。
 
