@@ -61,13 +61,13 @@ def main() -> None:
             try:
                 res = assistant.ask(c["question"], art, client=client, model=args.model)
                 break
-            except assistant.RateLimited as e:
+            except assistant.Transient as e:
                 if wait is None:
                     done = {r[0]["id"] for r in rows}
                     left = [x["id"] for x in cases if x["id"] not in done]
-                    sys.exit(f"{e}. Probably the daily free quota. Done {len(done)}/{len(cases)} "
+                    sys.exit(f"{e}. Still failing after retries (429 = probably the daily free quota; 503 = Google overloaded). Done {len(done)}/{len(cases)} "
                              f"(nothing written). Rerun later with: --only {' '.join(left)}")
-                print(f"{c['id']}  429, waiting {wait}s ...")
+                print(f"{c['id']}  {e} -> waiting {wait}s ...")
                 time.sleep(wait)
             except assistant.AssistantUnavailable as e:
                 sys.exit(f"Cannot run the evaluation: {e}")

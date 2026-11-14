@@ -8,6 +8,6 @@ services:
       PORT: "8000"
       # optional: enables /chat. Taken from your shell or a local .env (git-ignored); never commit it
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
     restart: unless-stopped
     # health check is defined in the Dockerfile (HEALTHCHECK -> /health)

@@ -23,11 +23,12 @@ from google.genai import errors, types
 from . import service
 from .service import Artifacts, UnknownSeries
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
 MODEL = os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
 MAX_OUTPUT_TOKENS = 8192
 MAX_TOOL_ROUNDS = 6               # hard stop for the agent loop (cost / quota control)
 MAX_QUESTION_CHARS = 500
+REQUEST_TIMEOUT_S = 90            # per model request
 KEY_ENVS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 BLOCKED = {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"}
 
@@ -114,8 +115,12 @@ class AssistantUnavailable(RuntimeError):
     """No credentials / API unreachable. The caller decides how to surface it (API: 503)."""
 
 
-class RateLimited(AssistantUnavailable):
-    """429 from Gemini (free-tier per-minute or per-day quota). The eval script waits and retries."""
+class Transient(AssistantUnavailable):
+    """Worth retrying later: 5xx (model overloaded) or 429. The eval script waits and retries."""
+
+
+class RateLimited(Transient):
+    """429 from Gemini (free-tier per-minute or per-day quota)."""
 
 
 @dataclass
@@ -167,7 +172,10 @@ def make_client() -> Any:
     key = next((os.environ[k] for k in KEY_ENVS if os.environ.get(k)), None)
     if not key:
         raise AssistantUnavailable("未設定 GEMINI_API_KEY")
-    return genai.Client(api_key=key)
+    # Bounded wait per request; no hidden SDK retries (the eval script retries Transient itself,
+    # and /chat should fail fast with 503 rather than hang the page).
+    return genai.Client(api_key=key, http_options=types.HttpOptions(
+        timeout=REQUEST_TIMEOUT_S * 1000, retry_options=types.HttpRetryOptions(attempts=1)))
 
 
 def _call_model(client: Any, model: str, contents: list, config) -> Any:
@@ -180,12 +188,14 @@ def _call_model(client: Any, model: str, contents: list, config) -> Any:
         if e.code in (401, 403) or "API_KEY_INVALID" in msg or "API key not valid" in msg:
             raise AssistantUnavailable("Gemini API key 無效或沒有權限（GEMINI_API_KEY）") from e
         if e.code == 404:
-            raise AssistantUnavailable(f"找不到模型 {model}（檢查 GEMINI_MODEL）") from e
+            raise AssistantUnavailable(f"模型 {model} 無法使用（檢查 GEMINI_MODEL）：{e.message}") from e
         raise                                                      # other 4xx = our bug: surface it
     except errors.ServerError as e:
-        raise AssistantUnavailable(f"Gemini API 暫時錯誤（{e.code}）") from e
+        raise Transient(f"Gemini API 暫時錯誤（{e.code}），請稍後再試") from e
     except httpx.TransportError as e:
-        raise AssistantUnavailable("無法連線到 Gemini API") from e
+        if isinstance(e, httpx.TimeoutException):
+            raise Transient(f"Gemini API 超過 {REQUEST_TIMEOUT_S} 秒沒有回應，請稍後再試") from e
+        raise Transient("無法連線到 Gemini API") from e
 
 
 def ask(question: str, a: Artifacts, client: Any | None = None, model: str | None = None) -> ChatResult:
