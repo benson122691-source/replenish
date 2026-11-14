@@ -15,7 +15,7 @@
 | FR-7 | `GET /forecast`：回傳指定品項、門市的 28 天預測 | US-1 | 已實作（M3） |
 | FR-8 | `POST /replenish`：回傳補貨點與補貨量，並驗證輸入 | US-2 | 已實作（M3） |
 | FR-9 | `GET /compare`：回傳策略成本比較與資料來源標示 | US-3 | 已實作（M3） |
-| FR-10 | HTML 頁面呼叫上述 API 並顯示圖表與建議 | US-1~3 | 未實作（M4） |
+| FR-10 | HTML 頁面呼叫上述 API 並顯示圖表與建議 | US-1~3 | 已實作（M4，`static/index.html`，由 `GET /` 提供；另加 `GET /series` 填選單） |
 | FR-11（加分） | LLM 助理以工具呼叫查詢 API，不自行編造數字 | G4 | 未排定 |
 
 ## 2. 邊界規則

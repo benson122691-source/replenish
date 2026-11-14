@@ -3,128 +3,328 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ReplenishAI 補貨助理</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<title>ReplenishAI</title>
+<!--
+  FR-10 dashboard (M4). One static file, served by FastAPI at "/". It only CALLS the API:
+  GET /series, GET /forecast, POST /replenish, GET /compare. No numbers are computed here
+  except display formatting, so the page can never show results the API did not return.
+  UI states follow docs/05-sds.md section 4: initial / loading / success / input error / server error.
+-->
 <style>
-  :root { --bg:#f7f7f5; --card:#fff; --ink:#1d1d1b; --mute:#6b6b66; --line:#e3e3df; --accent:#2a6fdb; --warn:#fff3cd; --warnink:#7a5b00; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --card:#201f1e; --ink:#ecebe8; --mute:#a3a29c; --line:#34332f; --accent:#6ea2f5; --warn:#3a3217; --warnink:#f0d889; } }
-  * { box-sizing:border-box; }
-  body { margin:0; padding:16px; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,"Noto Sans TC",sans-serif; }
-  main { max-width:960px; margin:0 auto; }
-  h1 { font-size:1.4rem; margin:0 0 4px; } h2 { font-size:1.05rem; margin:0 0 10px; }
-  .banner { background:var(--warn); color:var(--warnink); padding:10px 14px; border-radius:8px; margin:12px 0; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin:14px 0; }
-  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
-  label { display:flex; flex-direction:column; font-size:.85rem; color:var(--mute); gap:4px; }
-  select,input,button { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); }
-  button { background:var(--accent); color:#fff; border:0; cursor:pointer; }
-  table { border-collapse:collapse; width:100%; font-size:.9rem; } th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:right; } th:first-child,td:first-child { text-align:left; }
-  .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; } .kv div { background:var(--bg); border-radius:8px; padding:10px; } .kv b { display:block; font-size:1.2rem; }
-  .mute { color:var(--mute); font-size:.85rem; } .err { color:#c0392b; }
-  .scroll { overflow-x:auto; }
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5d6675; --line: #dde1e7;
+    --accent: #2563eb; --actual: #6b7280; --warn-bg: #fff4e5; --warn: #8a4b00;
+    --err-bg: #fdecec; --err: #a12020; --ok: #137333; --best: #e8f1ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b2029; --text: #e6e9ef; --muted: #9aa3b2; --line: #2d3440;
+      --accent: #6ea0ff; --actual: #9aa3b2; --warn-bg: #3a2a12; --warn: #ffcf8a;
+      --err-bg: #3b1d1d; --err: #ff9c9c; --ok: #7fd49a; --best: #1f2c44;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 2px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 14px; }
+  .banner { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; }
+  .banner[hidden] { display: none; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  form .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  input, select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+                  background: var(--card); color: var(--text); font: inherit; }
+  input[aria-invalid="true"] { border-color: var(--err); }
+  .field-err { color: var(--err); font-size: 12px; min-height: 18px; margin-top: 2px; }
+  button { font: inherit; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--accent);
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .6; cursor: default; }
+  .actions { margin-top: 6px; display: flex; gap: 10px; align-items: center; }
+  .state { color: var(--muted); padding: 28px 0; text-align: center; }
+  .error-box { background: var(--err-bg); color: var(--err); border-radius: 8px; padding: 12px 14px; }
+  .error-box button { margin-top: 8px; }
+  svg { width: 100%; height: auto; display: block; }
+  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+  .sw { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; }
+  .big { font-size: 34px; font-weight: 700; line-height: 1.1; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; margin-top: 10px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; }
+  tr.best td { background: var(--best); }
+  .neg { color: var(--ok); }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); }
 </style>
 </head>
 <body>
 <main>
-  <h1>ReplenishAI 補貨助理</h1>
-  <div class="mute">預測未來 28 天銷量，並換算成「現在該補多少貨」。</div>
-  <div id="banner" class="banner">載入中…</div>
+  <h1>ReplenishAI 補貨決策助理</h1>
+  <p class="sub">預測未來 28 天銷量 → 算出再訂購點與建議訂購量 → 用持有＋缺貨成本比較預測方法。</p>
+  <div id="banner" class="banner" hidden></div>
 
   <section class="card">
-    <h2>1. 預測（回測：與實際銷量對照）</h2>
-    <div class="row">
-      <label>門市<select id="store"></select></label>
-      <label>品項<select id="item"></select></label>
-    </div>
-    <canvas id="chart" height="110" style="margin-top:12px"></canvas>
-    <div id="fmsg" class="mute"></div>
+    <form id="form" novalidate>
+      <div class="row">
+        <div><label for="store">門市</label><select id="store" disabled><option>載入中…</option></select><div class="field-err"></div></div>
+        <div><label for="item">品項</label><select id="item" disabled></select><div class="field-err"></div></div>
+        <div><label for="on_hand">目前庫存（件）</label><input id="on_hand" type="number" inputmode="numeric" value="10" min="0" step="1"><div class="field-err"></div></div>
+        <div><label for="lead">交期 L（1–28 天）</label><input id="lead" type="number" inputmode="numeric" value="7" min="1" max="28" step="1"><div class="field-err"></div></div>
+        <div><label for="sl">服務水準（0.5–0.999）</label><input id="sl" type="number" inputmode="decimal" value="0.95" min="0.5" max="0.999" step="0.01"><div class="field-err"></div></div>
+        <div><label for="moq">最小訂購量 MOQ</label><input id="moq" type="number" inputmode="numeric" value="0" min="0" step="1"><div class="field-err"></div></div>
+      </div>
+      <div class="actions"><button id="go" type="submit" disabled>查詢</button><span id="status" class="note" aria-live="polite"></span></div>
+    </form>
   </section>
 
-  <section class="card">
-    <h2>2. 補貨建議</h2>
-    <div class="row">
-      <label>目前庫存<input id="onhand" type="number" min="0" value="10"></label>
-      <label>交期（天）<input id="lead" type="number" min="1" max="28" value="7"></label>
-      <label>服務水準<input id="sl" type="number" min="0.5" max="0.999" step="0.01" value="0.95"></label>
-      <label>最小訂購量 MOQ<input id="moq" type="number" min="0" value="0"></label>
-      <button id="go">計算</button>
-    </div>
-    <div id="rep" class="kv" style="margin-top:12px"></div>
-    <div id="rmsg" class="mute"></div>
-  </section>
+  <div class="grid">
+    <section class="card">
+      <h2>28 天預測 vs 實際（回測）</h2>
+      <div id="chart"><div class="state">選擇門市與品項後按「查詢」。</div></div>
+    </section>
+    <section class="card">
+      <h2>補貨建議</h2>
+      <div id="rec"><div class="state">尚未查詢</div></div>
+    </section>
+  </div>
 
   <section class="card">
-    <h2>3. 策略成本比較</h2>
-    <div class="scroll"><table id="cmp"></table></div>
-    <div id="cnote" class="mute" style="margin-top:8px"></div>
-    <h2 style="margin-top:16px">與 moving_avg_28 的成本差異（95% 信賴區間）</h2>
-    <div class="scroll"><table id="boot"></table></div>
+    <h2>預測方法成本比較 <span id="cmp-tag"></span></h2>
+    <div id="compare"><div class="state">載入中…</div></div>
   </section>
 </main>
+
 <script>
-const $ = id => document.getElementById(id);
-let chart, seriesInfo;
+"use strict";
+const $ = (id) => document.getElementById(id);
+const NAMES = { seasonal_naive: "季節性 naive（上週同日）", moving_avg_28: "28 天移動平均",
+                tsb: "TSB（間歇需求）", lightgbm: "LightGBM", lightgbm_q: "LightGBM 分位數（0.80）",
+                oracle: "完美預測（下界）" };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (x, d = 1) => (x === null || x === undefined ? "—" : Number(x).toLocaleString("zh-TW", { minimumFractionDigits: d, maximumFractionDigits: d }));
+let itemsByStore = {};
+
+// ---------------------------------------------------------------- API calls
+
 async function api(path, opts) {
-  const r = await fetch(path, opts);
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail || r.status));
-  return j;
+  let res;
+  try { res = await fetch(path, opts); }
+  catch { throw new Error("無法連線到伺服器，請確認服務是否在執行。"); }
+  let body = null;
+  try { body = await res.json(); } catch { /* non-JSON body */ }
+  if (!res.ok) {
+    let msg = body && body.detail;
+    if (Array.isArray(msg)) msg = msg.map((d) => `${(d.loc || []).slice(-1)[0]}: ${d.msg}`).join("；");
+    throw new Error(`伺服器回應 ${res.status}：${msg || res.statusText}`);
+  }
+  return body;
 }
-const fmt = (x, d = 2) => (x == null ? "–" : Number(x).toFixed(d));
-function fillItems() {
-  $("item").innerHTML = seriesInfo.items_by_store[$("store").value].map(i => `<option>${i}</option>`).join("");
+
+function errorBox(target, message, retry) {
+  target.innerHTML = `<div class="error-box">${esc(message)}<br><button type="button" class="secondary">重試</button></div>`;
+  target.querySelector("button").onclick = retry;
 }
-async function loadForecast() {
-  $("fmsg").textContent = ""; $("fmsg").className = "mute";
+
+function showSource(d) {
+  if (d.data_source === "synthetic") {
+    $("banner").textContent = "⚠ 資料來源：合成資料（synthetic）。所有數字只用來展示流程，不代表真實零售表現。";
+    $("banner").hidden = false;
+  }
+}
+
+// ---------------------------------------------------------------- dropdowns
+
+async function loadSeries() {
   try {
-    const f = await api(`/forecast?item_id=${encodeURIComponent($("item").value)}&store_id=${encodeURIComponent($("store").value)}`);
-    const data = {
-      labels: f.forecast.map(p => p.date.slice(5)),
-      datasets: [
-        { label: "預測 (LightGBM)", data: f.forecast.map(p => p.pred), borderColor: "#2a6fdb", tension: .2 },
-        { label: "實際銷量", data: f.forecast.map(p => p.actual), borderColor: "#e08a1e", borderDash: [5, 4], tension: .2 },
-      ],
-    };
-    if (chart) chart.destroy();
-    chart = new Chart($("chart"), { type: "line", data, options: { responsive: true, interaction: { mode: "index", intersect: false } } });
-    $("fmsg").textContent = `預測起點 ${f.forecast_origin}；這是回測，不是未來預測。`;
-  } catch (e) { $("fmsg").textContent = e.message; $("fmsg").className = "err"; }
-}
-async function calc() {
-  $("rmsg").textContent = ""; $("rmsg").className = "mute";
-  try {
-    const body = { item_id: $("item").value, store_id: $("store").value, on_hand: +$("onhand").value,
-                   lead_time_days: +$("lead").value, service_level: +$("sl").value, moq: +$("moq").value };
-    const r = await api("/replenish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    $("rep").innerHTML = [["建議補貨量", r.order_qty], ["再訂購點", fmt(r.reorder_point)], ["安全庫存", fmt(r.safety_stock)],
-                          ["預測日均需求 μ", fmt(r.mu_daily)], ["需求標準差 σ", fmt(r.sigma_daily)]]
-      .map(([k, v]) => `<div>${k}<b>${v}</b></div>`).join("");
-    $("rmsg").textContent = r.order_qty === 0 ? "庫存高於再訂購點，目前不需補貨。" : "";
-  } catch (e) { $("rmsg").textContent = e.message; $("rmsg").className = "err"; }
-}
-async function loadCompare() {
-  const c = await api("/compare");
-  const rows = c.strategies.map(s => `<tr><td>${s.name}</td><td>${fmt(s.total_cost, 1)}</td><td>${fmt(s.holding_cost, 1)}</td><td>${fmt(s.stockout_cost, 1)}</td><td>${fmt(s.fill_rate * 100, 1)}%</td><td>${fmt(s.rmsse, 3)}</td></tr>`);
-  $("cmp").innerHTML = `<tr><th>策略</th><th>總成本</th><th>持有</th><th>缺貨</th><th>滿足率</th><th>RMSSE</th></tr>` + rows.join("");
-  $("cnote").textContent = `${c.cost_params_note} 交期 ${c.lead_time_days} 天、服務水準 ${c.service_level}。oracle＝完美預測（成本下界）。`;
-  const b = Object.entries(c.bootstrap_vs_baseline || {}).map(([k, v]) =>
-    `<tr><td>${k}</td><td>${v.pct >= 0 ? "+" : ""}${fmt(v.pct, 1)}%</td><td>[${fmt(v.lo, 1)}, ${fmt(v.hi, 1)}]</td><td>${v.lo > 0 || v.hi < 0 ? "是" : "否"}</td></tr>`);
-  $("boot").innerHTML = `<tr><th>策略</th><th>成本變化</th><th>95% CI (%)</th><th>顯著？</th></tr>` + b.join("");
-}
-(async () => {
-  try {
-    const h = await api("/health");
-    $("banner").textContent = h.data_note + `（${h.n_series} 條序列，預測起點 ${h.forecast_origin}）`;
-    seriesInfo = await api("/series");
-    $("store").innerHTML = seriesInfo.stores.map(s => `<option>${s}</option>`).join("");
+    const d = await api("/series");
+    showSource(d);
+    itemsByStore = d.items_by_store;
+    $("store").innerHTML = d.stores.map((s) => `<option>${esc(s)}</option>`).join("");
+    $("store").disabled = false;
     fillItems();
-    $("store").onchange = () => { fillItems(); loadForecast(); };
-    $("item").onchange = loadForecast;
-    $("go").onclick = calc;
-    await Promise.all([loadForecast(), loadCompare()]);
-    calc();
-  } catch (e) { $("banner").textContent = "載入失敗：" + e.message; }
-})();
+    $("go").disabled = false;
+    $("status").textContent = "";
+  } catch (e) {
+    $("status").textContent = "";
+    errorBox($("chart"), "無法載入品項清單。" + e.message, loadSeries);
+  }
+}
+
+function fillItems() {
+  const items = itemsByStore[$("store").value] || [];
+  $("item").innerHTML = items.map((i) => `<option>${esc(i)}</option>`).join("");
+  $("item").disabled = items.length === 0;
+}
+
+// ---------------------------------------------------------------- input validation (BR-4, client side)
+
+function setErr(el, msg) {
+  el.setAttribute("aria-invalid", msg ? "true" : "false");
+  el.parentElement.querySelector(".field-err").textContent = msg || "";
+  return !msg;
+}
+
+function validate() {
+  const intIn = (el, lo, hi, label) => {
+    const v = el.value.trim();
+    if (v === "") return setErr(el, `請輸入${label}`);
+    const n = Number(v);
+    if (!Number.isInteger(n)) return setErr(el, `${label}必須是整數`);
+    if (n < lo || (hi !== undefined && n > hi)) return setErr(el, hi !== undefined ? `${label}需介於 ${lo}–${hi}` : `${label}不可小於 ${lo}`);
+    return setErr(el, "");
+  };
+  let ok = true;
+  ok = intIn($("on_hand"), 0, undefined, "庫存") && ok;
+  ok = intIn($("lead"), 1, 28, "交期") && ok;
+  ok = intIn($("moq"), 0, undefined, "MOQ") && ok;
+  const sl = $("sl"), v = Number(sl.value);
+  if (sl.value.trim() === "" || Number.isNaN(v)) ok = setErr(sl, "請輸入服務水準") && ok;
+  else if (v < 0.5 || v > 0.999) ok = setErr(sl, "服務水準需介於 0.5–0.999") && ok;
+  else setErr(sl, "");
+  return ok;
+}
+
+// ---------------------------------------------------------------- query
+
+async function query() {
+  if (!validate()) return;                       // input error: do NOT send a request
+  const item_id = $("item").value, store_id = $("store").value;
+  const body = { item_id, store_id, on_hand: Number($("on_hand").value), lead_time_days: Number($("lead").value),
+                 service_level: Number($("sl").value), moq: Number($("moq").value) };
+  $("go").disabled = true;
+  $("chart").innerHTML = `<div class="state">載入中…</div>`;
+  $("rec").innerHTML = `<div class="state">載入中…</div>`;
+  try {
+    const q = new URLSearchParams({ item_id, store_id });
+    const [f, r] = await Promise.all([
+      api(`/forecast?${q}`),
+      api("/replenish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+    ]);
+    drawChart(f, body.lead_time_days);
+    drawRec(r, body);
+    saveForm();
+  } catch (e) {
+    errorBox($("chart"), e.message, query);
+    $("rec").innerHTML = `<div class="state">—</div>`;
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------- chart (inline SVG)
+
+function drawChart(f, lead) {
+  const pts = f.forecast, W = 640, H = 280, m = { l: 40, r: 12, t: 12, b: 32 };
+  const n = pts.length, maxY = Math.max(1, ...pts.map((p) => Math.max(p.pred, p.actual))) * 1.1;
+  const x = (i) => m.l + (i * (W - m.l - m.r)) / Math.max(1, n - 1);
+  const y = (v) => H - m.b - (v / maxY) * (H - m.t - m.b);
+  const path = (key) => pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join("");
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => t * maxY);
+  const step = Math.ceil(n / 7);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(f.item_id)} 在 ${esc(f.store_id)} 的 28 天預測與實際銷量">`;
+  // lead-time window shading: the days the reorder point covers
+  svg += `<rect x="${m.l}" y="${m.t}" width="${(x(Math.min(lead, n) - 1) - m.l).toFixed(1)}" height="${H - m.t - m.b}" fill="var(--accent)" opacity=".07"/>`;
+  for (const t of ticks) svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/>` +
+    `<text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${fmt(t, 1)}</text>`;
+  pts.forEach((p, i) => { if (i % step === 0) svg += `<text x="${x(i)}" y="${H - 10}" text-anchor="middle" font-size="11" fill="var(--muted)">${esc(p.date.slice(5))}</text>`; });
+  svg += `<path d="${path("actual")}" fill="none" stroke="var(--actual)" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+  svg += `<path d="${path("pred")}" fill="none" stroke="var(--accent)" stroke-width="2.5"/>`;
+  pts.forEach((p, i) => { svg += `<circle cx="${x(i)}" cy="${y(p.pred)}" r="7" fill="transparent"><title>${esc(p.date)}　預測 ${fmt(p.pred, 2)}　實際 ${fmt(p.actual, 0)}</title></circle>`; });
+  svg += `</svg>`;
+  $("chart").innerHTML = svg +
+    `<div class="legend"><span><span class="sw" style="background:var(--accent)"></span>LightGBM 預測</span>` +
+    `<span><span class="sw" style="background:var(--actual)"></span>實際銷量（虛線）</span>` +
+    `<span><span class="sw" style="background:var(--accent);opacity:.25;height:10px"></span>交期 ${lead} 天</span></div>` +
+    `<p class="note">預測原點 ${esc(f.forecast_origin)}：模型只用這天以前的資料訓練，圖中是保留期的回測，不是真正的未來預測。</p>`;
+}
+
+// ---------------------------------------------------------------- recommendation card
+
+function drawRec(r, req) {
+  const order = r.order_qty > 0;
+  $("rec").innerHTML =
+    `<div class="note" style="margin-top:0">${esc(r.item_id)} ・ ${esc(r.store_id)}</div>` +
+    `<div class="big">${order ? `訂 ${r.order_qty.toLocaleString("zh-TW")} 件` : "暫不需訂貨"}</div>` +
+    `<div class="note" style="margin-top:4px">${order
+        ? `庫存 ${req.on_hand} ≤ 再訂購點 ${fmt(r.reorder_point, 1)}` + (req.moq > 0 && r.order_qty === req.moq ? `（已套用 MOQ ${req.moq}）` : "")
+        : `庫存 ${req.on_hand} 高於再訂購點 ${fmt(r.reorder_point, 1)}`}</div>` +
+    `<dl class="kv">` +
+    `<dt>再訂購點 ROP</dt><dd>${fmt(r.reorder_point, 2)}</dd>` +
+    `<dt>安全庫存 zσ√L</dt><dd>${fmt(r.safety_stock, 2)}</dd>` +
+    `<dt>日均預測 μ</dt><dd>${fmt(r.mu_daily, 3)}</dd>` +
+    `<dt>日銷量標準差 σ</dt><dd>${fmt(r.sigma_daily, 3)}</dd>` +
+    `<dt>z（服務水準 ${req.service_level}）</dt><dd>${fmt(r.z, 3)}</dd>` +
+    `</dl>` +
+    `<p class="note">ROP = μ·L + z·σ·√L，L = ${req.lead_time_days} 天。在途量在 MVP 中視為 0。</p>`;
+}
+
+// ---------------------------------------------------------------- cost comparison
+
+async function loadCompare() {
+  try {
+    const d = await api("/compare");
+    showSource(d);
+    if (d.data_source === "synthetic") $("cmp-tag").innerHTML = `<span class="tag">合成資料</span>`;
+    const real = d.strategies.filter((s) => s.name !== "oracle");
+    const best = real.reduce((a, b) => (b.total_cost < a.total_cost ? b : a)).name;
+    const rows = d.strategies.map((s) => {
+      const pct = s.vs_ma28_pct;
+      return `<tr class="${s.name === best ? "best" : ""}"><td>${esc(NAMES[s.name] || s.name)}</td>` +
+        `<td>${fmt(s.total_cost, 1)}</td><td>${fmt(s.holding_cost, 1)}</td><td>${fmt(s.stockout_cost, 1)}</td>` +
+        `<td>${fmt(s.fill_rate * 100, 1)}%</td><td>${fmt(s.rmsse, 3)}</td>` +
+        `<td class="${pct < 0 ? "neg" : ""}">${s.name === d.baseline ? "基準" : (pct > 0 ? "+" : "") + fmt(pct, 1) + "%"}</td></tr>`;
+    }).join("");
+    const cp = d.cost_params || {};
+    const sens = (d.sensitivity || []).map((s) => `${s.stockout_ratio}× → ${esc(NAMES[s.best_non_oracle] || s.best_non_oracle)}`).join("、");
+    const boot = Object.entries(d.bootstrap_vs_baseline || {}).map(([k, v]) =>
+      `<tr><td>${esc(NAMES[k] || k)}</td><td class="${v.pct < 0 ? "neg" : ""}">${v.pct > 0 ? "+" : ""}${fmt(v.pct, 1)}%</td>` +
+      `<td>[${fmt(v.lo, 1)}, ${fmt(v.hi, 1)}]</td><td>${v.lo > 0 || v.hi < 0 ? "是" : "否"}</td></tr>`).join("");
+    $("compare").innerHTML =
+      `<div class="table-wrap"><table><thead><tr><th>方法</th><th>總成本</th><th>持有成本</th><th>缺貨成本</th><th>滿足率</th><th>RMSSE</th><th>vs 28 天移動平均</th></tr></thead><tbody>${rows}</tbody></table></div>` +
+      `<p class="note">${d.origins.length} 個滾動原點（${esc(d.origins.join("、"))}）平均，每個原點預測 ${d.horizon_days} 天；交期 ${d.lead_time_days} 天、服務水準 ${d.service_level}。` +
+      ` 成本參數：持有 ${fmt((cp.holding_rate_per_year || 0) * 100, 0)}%/年、缺貨 ${cp.stockout_ratio}× 單價——${esc(d.cost_params_note)}</p>` +
+      (sens ? `<p class="note">敏感度：缺貨成本比例改變時，成本最低的方法（不含完美預測）：${sens}。</p>` : "") +
+      (boot ? `<h3>與 28 天移動平均的成本差異（以序列為單位的配對 bootstrap）</h3>` +
+        `<div class="table-wrap"><table><thead><tr><th>方法</th><th>成本變化</th><th>95% 信賴區間 (%)</th><th>區間不含 0</th></tr></thead><tbody>${boot}</tbody></table></div>` +
+        `<p class="note">LightGBM 分位數直接用每日需求 0.80 分位數當補貨輸入、不加 zσ，補貨規則與其他方法不同，比較時請留意。</p>` : "");
+  } catch (e) {
+    errorBox($("compare"), e.message, loadCompare);
+  }
+}
+
+// ---------------------------------------------------------------- remember inputs (per-browser convenience only)
+
+const FIELDS = ["on_hand", "lead", "sl", "moq"];
+function saveForm() {
+  try { localStorage.setItem("replenishai.form", JSON.stringify({ store: $("store").value, item: $("item").value, ...Object.fromEntries(FIELDS.map((k) => [k, $(k).value])) })); } catch {}
+}
+function restoreForm() {
+  try {
+    const s = JSON.parse(localStorage.getItem("replenishai.form") || "null");
+    if (!s) return;
+    FIELDS.forEach((k) => { if (s[k] !== undefined) $(k).value = s[k]; });
+    if (itemsByStore[s.store]) { $("store").value = s.store; fillItems(); }
+    if ([...$("item").options].some((o) => o.value === s.item)) $("item").value = s.item;
+  } catch {}
+}
+
+// ---------------------------------------------------------------- wire up
+
+$("store").addEventListener("change", fillItems);
+$("form").addEventListener("submit", (e) => { e.preventDefault(); query(); });
+FIELDS.forEach((k) => $(k).addEventListener("input", () => setErr($(k), "")));
+$("status").textContent = "載入品項清單…";
+loadSeries().then(restoreForm);
+loadCompare();
 </script>
 </body>
 </html>

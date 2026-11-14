@@ -176,6 +176,29 @@ def test_synthetic_results_are_labelled(client, results):  # NFR-5
         assert body["data_source"] == "synthetic" and "合成" in body["data_note"]
 
 
+# ---------------------------------------------------------------- dashboard (M4, FR-10)
+
+@needs_artifacts
+def test_index_serves_dashboard_page(client):  # FR-10
+    r = client.get("/")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    html = r.text
+    for path in ("/series", "/forecast", "/replenish", "/compare"):   # the page calls the API
+        assert path in html
+    assert "synthetic" in html                                      # NFR-5 banner logic exists
+
+
+@needs_artifacts
+def test_series_lists_every_pair_in_artifacts(client, forecasts):  # fills the dropdowns
+    body = client.get("/series").json()
+    pairs = forecasts[["store_id", "item_id"]].drop_duplicates()
+    assert body["stores"] == sorted(pairs["store_id"].unique())
+    assert sum(len(v) for v in body["items_by_store"].values()) == len(pairs)
+    store, items = next(iter(body["items_by_store"].items()))
+    assert client.get("/forecast", params={"item_id": items[0], "store_id": store}).status_code == 200
+    assert "data_source" in body
+
+
 # ---------------------------------------------------------------- startup failure
 
 def test_app_refuses_to_start_without_artifacts(tmp_path):  # docs/04-sad.md failure handling

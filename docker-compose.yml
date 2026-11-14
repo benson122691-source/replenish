@@ -7,3 +7,4 @@ services:
     environment:
       PORT: "8000"
     restart: unless-stopped
+    # health check is defined in the Dockerfile (HEALTHCHECK -> /health)

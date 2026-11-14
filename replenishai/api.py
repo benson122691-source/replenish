@@ -29,7 +29,7 @@ from .data import HORIZON
 from .policy import order_quantity, reorder_point, z_from_service_level
 
 ROOT = Path(__file__).resolve().parent.parent
-STATIC_INDEX = ROOT / "static" / "index.html"
+STATIC = ROOT / "static"
 ARTIFACTS_ENV = "REPLENISHAI_ARTIFACTS"          # override the folder (used by tests / Docker)
 REQUIRED_FILES = ("results.json", "holdout_forecasts.csv", "series_stats.csv")
 MODEL = "lightgbm"                               # the model whose forecast the API serves
@@ -124,7 +124,7 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
         app.state.art = load_artifacts(folder)     # fails fast if the experiment was not run
         yield
 
-    app = FastAPI(title="ReplenishAI", version="0.3.0", lifespan=lifespan,
+    app = FastAPI(title="ReplenishAI", version="0.4.0", lifespan=lifespan,
                   description="Demand forecast + replenishment decision API. "
                               "Check `data_source` in every response.")
 
@@ -154,16 +154,18 @@ def create_app(artifacts_dir: str | Path | None = None) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     def index():
-        """The one-page dashboard (static/index.html); it only calls the JSON endpoints below."""
-        return FileResponse(STATIC_INDEX)
+        """FR-10: the dashboard page, served by the same app (one service, no CORS)."""
+        return FileResponse(STATIC / "index.html")
 
     @app.get("/series")
     def series(request: Request) -> dict:
-        """Items and stores that exist in the served forecast (fills the dashboard dropdowns)."""
-        f = art(request).forecasts
-        pairs = f[["item_id", "store_id"]].drop_duplicates()
-        return {"stores": sorted(pairs["store_id"].unique()),
-                "items_by_store": {st: sorted(g["item_id"]) for st, g in pairs.groupby("store_id")}}
+        """Stores and items available in the artifacts (fills the dashboard's dropdowns)."""
+        a = art(request)
+        pairs = a.forecasts[["store_id", "item_id"]].drop_duplicates()
+        return {**source_fields(a),
+                "stores": sorted(pairs["store_id"].unique().tolist()),
+                "items_by_store": {s: sorted(g["item_id"].tolist())
+                                   for s, g in pairs.groupby("store_id")}}
 
     @app.get("/forecast", response_model=ForecastResponse)
     def forecast(item_id: str, store_id: str, request: Request):

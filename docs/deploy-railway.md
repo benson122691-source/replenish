@@ -1,6 +1,6 @@
 # Railway 部署計畫（針對 ReplenishAI）
 
-狀態：**計畫，尚未驗證**。API（M3）、頁面與 Docker（M4）完成後才能實際部署。平台方案與費用請在建立資源前到官方頁面確認，不一定永久免費。
+狀態：**計畫，尚未驗證**。API（M3）、頁面與 Dockerfile（M4）已寫好；Docker 映像已在本機建置並通過 TC-22（2026-11-10），雲端部署尚未執行。平台方案與費用請在建立資源前到官方頁面確認，不一定永久免費。
 
 官方文件（以此為準，影片畫面可能已改版）：
 - Quick Start（從 GitHub 部署）：https://docs.railway.com/quick-start
@@ -29,10 +29,12 @@
 ## 要在 M3、M4 補上的東西（部署前置）
 
 - `GET /health` 回 200（M3）。
-- 程式監聽環境變數 `PORT`（Dockerfile 的 CMD 使用 `${PORT:-8000}`）（M4，已加入）。
-- 建置時執行 `python scripts/run_experiment.py` 以產生 `artifacts/`（因為 artifacts 被 .gitignore 排除）（M4，已加入）。
-- 建置時間與記憶體：本機乾淨 venv 模擬，實驗約 13 秒；Railway 上實際數字待確認。
-- 注意：開發機沒有 Docker，Dockerfile 尚未實際 build 過；第一次在 Railway 建置時要看建置日誌。
+- 程式監聽環境變數 `PORT`（Dockerfile 的 CMD 使用 `${PORT:-8000}`）（M4，已寫入 Dockerfile）。
+- 建置時執行 `python scripts/run_experiment.py` 以產生 `artifacts/`（因為 artifacts 被 .gitignore 排除）（M4，已寫入 Dockerfile）。
+- 建置時間與記憶體：LightGBM 訓練約 13–20 秒（本機合成資料量），Railway 上實際數字待確認。
+- 2026-11-14 修改 Dockerfile：改裝固定版本的 `requirements-runtime.txt`、以非 root 使用者執行、加上 HEALTHCHECK。
+  修改後只在乾淨 Python 3.12 venv 中模擬建置步驟驗證（實驗、全部端點、健康檢查指令皆通過），**尚未重新 `docker build`**；
+  11-10 的 TC-22 驗證的是修改前的版本，部署前要重跑一次。
 
 ## 失敗時的備案（指南 4 節第 6 點）
 
