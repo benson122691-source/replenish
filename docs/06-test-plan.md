@@ -25,9 +25,9 @@
 | TC-19 | NFR-1 | 同設定重跑兩次 | 指標一致 | 通過（`test_lgbm_is_reproducible`；僅測 LightGBM 預測） |
 | TC-20 | NFR-3 | 單品項預測 API p95 | < 1 秒 | 部分：本機 uvicorn、同一品項連續 200 次 GET /forecast，p95 ≈ 5 ms（2026-11-09，手動量測，非自動測試）；雲端未測 |
 | TC-21 | NFR-4 | 提交前搜尋 Repo 的金鑰與 .env | 無 | 通過（2026-11-10）：對所有追蹤檔搜尋 api_key/secret/token/password/ghp_/sk-/AKIA/私鑰標頭，無結果；無 .env；commit 作者信箱為 noreply@example.com。2026-11-14 複查：4 個 commit 的作者信箱曾是個人信箱並已推上 GitHub；已改寫這些 commit（只改作者/提交者，內容不變；已簽章的舊 commit 未動）並 force push，複查後全部為 noreply |
-| TC-22 | NFR-6 | `docker compose up` 後可開頁面 | 成功 | 通過（2026-11-10，本機 Docker 29.9.2）：`docker compose build` 約 2 分鐘（映像 879MB），建置時跑實驗的成本數字與本機一致；`docker compose up` 後 `/`、`/series`、`/forecast`、`/compare`、`/replenish` 皆 200，錯誤輸入 422、未知品項 404，healthcheck 為 healthy；設 `PORT=9000` 時改聽 9000。頁面的瀏覽器操作見 TC-18。**注意**：2026-11-14 Dockerfile 改為固定版本 `requirements-runtime.txt`、非 root、HEALTHCHECK，修改後只在乾淨 venv 模擬建置步驟（通過），尚未重跑 `docker compose build`，部署前需重跑本案例。2026-11-14 加入 `anthropic` 後再模擬一次：`/health`、`/`、`/series`、`/compare` 200，無 key 時 `/chat` 503 |
-| TC-23 | FR-11 | 助理的工具迴圈（以假 client 取代 Claude，不連網） | 工具結果與 API 數字相同；錯誤輸入回傳給模型而非崩潰；平行呼叫同一則訊息回傳；拒答、回合上限；無 key 或憑證設定錯誤時 `/chat` 503 | 通過（pytest `tests/test_assistant.py` 17 項，2026-11-14）；同檔也驗證 30 題評測集每個期望呼叫都能在資料上成功執行，以及評分器能抓出編造的數字 |
-| TC-24 | FR-11、M-4 | 30 題評測集（查詢 10、模擬 14、拒答/澄清 6）以真實 Claude 執行 `scripts/eval_assistant.py` | 工具呼叫正確率 ≥ 80% | **未執行**：開發機沒有 Anthropic API key。設定 `ANTHROPIC_API_KEY` 後執行，結果自動寫入 `docs/assistant-eval.md` |
+| TC-22 | NFR-6 | `docker compose up` 後可開頁面 | 成功 | 通過（2026-11-10，本機 Docker 29.9.2）：`docker compose build` 約 2 分鐘（映像 879MB），建置時跑實驗的成本數字與本機一致；`docker compose up` 後 `/`、`/series`、`/forecast`、`/compare`、`/replenish` 皆 200，錯誤輸入 422、未知品項 404，healthcheck 為 healthy；設 `PORT=9000` 時改聽 9000。頁面的瀏覽器操作見 TC-18。**注意**：2026-11-14 Dockerfile 改為固定版本 `requirements-runtime.txt`、非 root、HEALTHCHECK，修改後只在乾淨 venv 模擬建置步驟（通過），尚未重跑 `docker compose build`，部署前需重跑本案例。2026-11-14 加入 LLM SDK 後再模擬一次（之後 SDK 由 `anthropic` 換成 `google-genai`，需在 TC-22 重跑時一併確認）：`/health`、`/`、`/series`、`/compare` 200，無 key 時 `/chat` 503 |
+| TC-23 | FR-11 | 助理的工具迴圈（以假 client 取代 Gemini，不連網） | 工具結果與 API 數字相同；錯誤輸入回傳給模型而非崩潰；平行呼叫同一則訊息回傳；安全封鎖、回合上限、整數參數修正；429/403/404 轉成「暫時無法使用」；無 key 時 `/chat` 503 | 通過（pytest `tests/test_assistant.py` 20 項，2026-11-14，改用 Gemini 後）；同檔也驗證 30 題評測集每個期望呼叫都能在資料上成功執行，以及評分器能抓出編造的數字 |
+| TC-24 | FR-11、M-4 | 30 題評測集（查詢 10、模擬 14、拒答/澄清 6）以真實 Gemini 執行 `scripts/eval_assistant.py` | 工具呼叫正確率 ≥ 80% | **未執行**：開發機沒有 Gemini API key。設定 `GEMINI_API_KEY` 後執行，結果自動寫入 `docs/assistant-eval.md` |
 
 ## 執行方式
 

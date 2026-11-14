@@ -100,7 +100,7 @@ python scripts/check_dashboard.py http://127.0.0.1:8000 docs/evidence   # 瀏覽
 | GET | `/forecast?item_id=&store_id=` | 單一品項 28 天 LightGBM 預測與實際值（回測） |
 | POST | `/replenish` | 再訂購點、安全庫存、建議訂購量；交期限 1–28 天、服務水準 0.5–0.999，超出範圍回 422，查無品項回 404 |
 | GET | `/compare` | 各方法的誤差、成本與敏感度分析 |
-| POST | `/chat` | 用自然語言提問，LLM 助理呼叫上面的工具回答；未設定 `ANTHROPIC_API_KEY` 時回 503 |
+| POST | `/chat` | 用自然語言提問，LLM 助理呼叫上面的工具回答；未設定 `GEMINI_API_KEY` 時回 503 |
 
 範例：
 
@@ -113,9 +113,9 @@ curl -X POST http://127.0.0.1:8000/replenish -H "Content-Type: application/json"
 
 頁面最下方可以直接問，例如「FOODS_1_003 在 CA_1 庫存 15、交期 7 天；交期延長 3 天會多訂多少？」。
 
-- **不讓模型猜數字**：Claude（`claude-opus-5-5`）只能透過 4 個工具取得數字：查門市與品項、查預測、算補貨、比較方法。這些工具和 REST API 共用 `replenishai/service.py`，所以助理說的數字和看板一致。
+- **不讓模型猜數字**：Gemini（預設 `gemini-2.5-flash`，可用環境變數 `GEMINI_MODEL` 換）只能透過 4 個工具取得數字：查門市與品項、查預測、算補貨、比較方法。這些工具和 REST API 共用 `replenishai/service.py`，所以助理說的數字和看板一致。
 - **範圍限制**：查無品項、交期超出 1–28 天、沒給庫存時，助理會照實說明或反問，不會換參數硬算；天氣、下單這類請求會拒絕。每次只回答一題，不記得前一題。
-- **啟用**：設定環境變數 `ANTHROPIC_API_KEY`（不要寫進 Repo）。沒設定時 `/chat` 回 503，其他功能照常。
+- **啟用**：到 [Google AI Studio](https://aistudio.google.com/apikey) 建立 API key，設定環境變數 `GEMINI_API_KEY`（不要寫進 Repo）。免費方案有每分鐘／每日次數上限。沒設定時 `/chat` 回 503，其他功能照常。
 - **評測**：`eval/assistant_cases.json` 有 30 題（查詢 10、模擬 14、拒答/澄清 6）。`python scripts/eval_assistant.py` 會實際呼叫模型並評分：
   - 工具呼叫是否正確：工具、參數，以及不該成功的呼叫有沒有被擋下
   - 回答裡的數字能否對應到工具輸出

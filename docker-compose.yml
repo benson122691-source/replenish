@@ -7,6 +7,7 @@ services:
     environment:
       PORT: "8000"
       # optional: enables /chat. Taken from your shell or a local .env (git-ignored); never commit it
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
     restart: unless-stopped
     # health check is defined in the Dockerfile (HEALTHCHECK -> /health)

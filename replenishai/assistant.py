@@ -1,30 +1,35 @@
-"""LLM replenishment assistant (project-brief differentiator 3): Claude answers questions by
+"""LLM replenishment assistant (project-brief differentiator 3): Gemini answers questions by
 CALLING TOOLS over the experiment artifacts, never by guessing numbers.
 
 - Tools are thin wrappers over replenishai.service, the same functions the REST API uses, so the
   assistant cannot report a number the API/dashboard would not report for the same inputs.
 - One question per call (no chat memory): every answer can be checked on its own, which is what
   the 30-case evaluation (scripts/eval_assistant.py) needs.
-- Needs Anthropic credentials (ANTHROPIC_API_KEY). Without them `ask` raises AssistantUnavailable
-  and the API answers 503; the rest of the app keeps working.
+- Needs a Gemini API key (GEMINI_API_KEY, or GOOGLE_API_KEY). Without it `ask` raises
+  AssistantUnavailable and the API answers 503; the rest of the app keeps working.
+- Model: GEMINI_MODEL env var, default below (has a free tier on the Gemini Developer API).
 """
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-import anthropic
+import httpx
+from google import genai
+from google.genai import errors, types
 
 from . import service
 from .service import Artifacts, UnknownSeries
 
-MODEL = "claude-opus-5-5"
-EFFORT = "medium"                 # tool routing over 4 small tools; raise only if the eval says so
-MAX_TOKENS = 16000
-MAX_TOOL_ROUNDS = 6               # hard stop for the agent loop (cost control)
+DEFAULT_MODEL = "gemini-2.5-flash"
+MODEL = os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
+MAX_OUTPUT_TOKENS = 8192
+MAX_TOOL_ROUNDS = 6               # hard stop for the agent loop (cost / quota control)
 MAX_QUESTION_CHARS = 500
-FALLBACK_BETA = "server-side-fallback-2026-07-01"
+KEY_ENVS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+BLOCKED = {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"}
 
 SYSTEM_PROMPT = """你是 ReplenishAI 的補貨查詢助理，服務對象是零售店的採購人員。用繁體中文回答，簡潔、直接。
 
@@ -43,9 +48,11 @@ SYSTEM_PROMPT = """你是 ReplenishAI 的補貨查詢助理，服務對象是零
 
 
 def _tool(name: str, description: str, properties: dict, required: list[str]) -> dict:
-    return {"name": name, "description": description, "strict": True,
-            "input_schema": {"type": "object", "properties": properties,
-                             "required": required, "additionalProperties": False}}
+    """Provider-neutral tool spec (JSON Schema). Gemini has no strict mode, so `_coerce_args`
+    re-checks types before a tool runs and the service layer still validates every value."""
+    return {"name": name, "description": description,
+            "parameters": {"type": "object", "properties": properties,
+                           "required": required, "additionalProperties": False}}
 
 
 _ITEM = {"type": "string", "description": "品項代碼，例如 FOODS_1_001"}
@@ -107,6 +114,10 @@ class AssistantUnavailable(RuntimeError):
     """No credentials / API unreachable. The caller decides how to surface it (API: 503)."""
 
 
+class RateLimited(AssistantUnavailable):
+    """429 from Gemini (free-tier per-minute or per-day quota). The eval script waits and retries."""
+
+
 @dataclass
 class ToolCall:
     name: str
@@ -125,75 +136,113 @@ class ChatResult:
     output_tokens: int = 0
 
 
-def ask(question: str, a: Artifacts, client: Any | None = None, model: str = MODEL) -> ChatResult:
+_SCHEMAS = {t["name"]: t["parameters"]["properties"] for t in TOOLS}
+
+
+def _coerce_args(name: str, args: dict) -> dict:
+    """Gemini may send 10.0 for an integer field; turn whole floats back into int per the schema."""
+    props = _SCHEMAS.get(name, {})
+    out = {}
+    for k, v in args.items():
+        if props.get(k, {}).get("type") == "integer" and isinstance(v, float) and v.is_integer():
+            v = int(v)
+        out[k] = v
+    return out
+
+
+def _config() -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
+        tools=[types.Tool(function_declarations=[
+            types.FunctionDeclaration(name=t["name"], description=t["description"],
+                                      parameters_json_schema=t["parameters"]) for t in TOOLS])],
+        # we run the loop ourselves: every call must be recorded for the eval
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        temperature=0,
+        max_output_tokens=MAX_OUTPUT_TOKENS,
+    )
+
+
+def make_client() -> Any:
+    key = next((os.environ[k] for k in KEY_ENVS if os.environ.get(k)), None)
+    if not key:
+        raise AssistantUnavailable("未設定 GEMINI_API_KEY")
+    return genai.Client(api_key=key)
+
+
+def _call_model(client: Any, model: str, contents: list, config) -> Any:
+    try:
+        return client.models.generate_content(model=model, contents=contents, config=config)
+    except errors.ClientError as e:
+        msg = str(e)
+        if e.code == 429:
+            raise RateLimited("Gemini API 達到額度上限（免費方案每分鐘／每日次數），請稍後再試") from e
+        if e.code in (401, 403) or "API_KEY_INVALID" in msg or "API key not valid" in msg:
+            raise AssistantUnavailable("Gemini API key 無效或沒有權限（GEMINI_API_KEY）") from e
+        if e.code == 404:
+            raise AssistantUnavailable(f"找不到模型 {model}（檢查 GEMINI_MODEL）") from e
+        raise                                                      # other 4xx = our bug: surface it
+    except errors.ServerError as e:
+        raise AssistantUnavailable(f"Gemini API 暫時錯誤（{e.code}）") from e
+    except httpx.TransportError as e:
+        raise AssistantUnavailable("無法連線到 Gemini API") from e
+
+
+def ask(question: str, a: Artifacts, client: Any | None = None, model: str | None = None) -> ChatResult:
     """Answer one question with a manual tool loop (we need every call recorded for the eval)."""
     question = question.strip()
     if not question:
         raise ValueError("question is empty")
     if len(question) > MAX_QUESTION_CHARS:
         raise ValueError(f"question longer than {MAX_QUESTION_CHARS} characters")
+    model = model or MODEL
     if client is None:
-        try:
-            client = anthropic.Anthropic()
-        except anthropic.CredentialsError as e:                 # broken `ant auth` profile
-            raise AssistantUnavailable(f"Anthropic 憑證設定有誤：{e}") from e
-    messages: list[dict] = [{"role": "user", "content": question}]
-    result = ChatResult(answer="")
+        client = make_client()
+    config = _config()
+    contents: list = [types.Content(role="user", parts=[types.Part.from_text(text=question)])]
+    result = ChatResult(answer="", served_by=model)
 
     for _ in range(MAX_TOOL_ROUNDS):
-        try:
-            resp = client.beta.messages.create(
-                model=model, max_tokens=MAX_TOKENS, system=SYSTEM_PROMPT, tools=TOOLS,
-                messages=messages, output_config={"effort": EFFORT},
-                betas=[FALLBACK_BETA], fallbacks="default",   # re-run on another model if declined
-            )
-        except anthropic.CredentialsError as e:
-            raise AssistantUnavailable(f"Anthropic 憑證設定有誤：{e}") from e
-        except anthropic.AuthenticationError as e:
-            raise AssistantUnavailable("Anthropic 憑證無效或未設定（ANTHROPIC_API_KEY）") from e
-        except anthropic.PermissionDeniedError as e:
-            raise AssistantUnavailable("這把 API key 沒有使用此模型的權限") from e
-        except anthropic.RateLimitError as e:
-            raise AssistantUnavailable("Anthropic API 達到速率上限，請稍後再試") from e
-        except anthropic.APIStatusError as e:
-            if e.status_code >= 500:
-                raise AssistantUnavailable(f"Anthropic API 暫時錯誤（{e.status_code}）") from e
-            raise                                                  # 4xx = our bug: surface it
-        except anthropic.APIConnectionError as e:
-            raise AssistantUnavailable("無法連線到 Anthropic API") from e
-        except TypeError as e:                                     # SDK could not resolve auth
-            if "auth" in str(e).lower() or "api_key" in str(e).lower():
-                raise AssistantUnavailable("未設定 ANTHROPIC_API_KEY") from e
-            raise
+        resp = _call_model(client, model, contents, config)
+        usage = getattr(resp, "usage_metadata", None)
+        result.input_tokens += getattr(usage, "prompt_token_count", 0) or 0
+        result.output_tokens += ((getattr(usage, "candidates_token_count", 0) or 0)
+                                 + (getattr(usage, "thoughts_token_count", 0) or 0))
+        result.served_by = getattr(resp, "model_version", None) or model
 
-        result.stop_reason = resp.stop_reason
-        result.served_by = getattr(resp, "model", model)
-        usage = getattr(resp, "usage", None)
-        result.input_tokens += getattr(usage, "input_tokens", 0) or 0
-        result.output_tokens += getattr(usage, "output_tokens", 0) or 0
-        # keep every block (thinking, fallback, tool_use) exactly as returned
-        messages.append({"role": "assistant", "content": resp.content})
-
-        if resp.stop_reason == "refusal":
+        feedback = getattr(resp, "prompt_feedback", None)
+        if not resp.candidates or (feedback and feedback.block_reason):
+            result.stop_reason = "blocked"
             result.answer = "這個問題我無法回答。我可以查詢品項預測、計算補貨建議，或比較各預測方法的成本。"
             return result
-        if resp.stop_reason == "pause_turn":
-            continue
-        tool_uses = [b for b in resp.content if b.type == "tool_use"]
-        if resp.stop_reason != "tool_use" or not tool_uses:
-            result.answer = "".join(b.text for b in resp.content if b.type == "text").strip()
-            if resp.stop_reason == "max_tokens":
-                result.answer += "\n（回答過長被截斷）"
+        cand = resp.candidates[0]
+        reason = getattr(cand.finish_reason, "value", str(cand.finish_reason or ""))
+        result.stop_reason = reason
+        if reason in BLOCKED:
+            result.answer = "這個問題我無法回答。我可以查詢品項預測、計算補貨建議，或比較各預測方法的成本。"
             return result
 
-        tool_results = []
-        for tu in tool_uses:                       # all results go back in ONE user message
-            args = tu.input if isinstance(tu.input, dict) else json.loads(tu.input)
-            ok, out = run_tool(a, tu.name, args)
-            result.tool_calls.append(ToolCall(tu.name, args, ok, out))
-            tool_results.append({"type": "tool_result", "tool_use_id": tu.id,
-                                 "content": out, "is_error": not ok})
-        messages.append({"role": "user", "content": tool_results})
+        calls = resp.function_calls or []
+        if not calls:
+            parts = (cand.content.parts if cand.content else None) or []
+            result.answer = "".join(p.text for p in parts if p.text and not p.thought).strip()
+            if reason == "MAX_TOKENS":
+                result.answer += "\n（回答過長被截斷）"
+            if not result.answer:
+                result.answer = "沒有產生回答，請換個方式再問一次。"
+            return result
+
+        # keep the model turn exactly as returned (thought signatures must go back unchanged)
+        contents.append(cand.content)
+        parts = []
+        for fc in calls:                          # all results go back in ONE user turn
+            args = _coerce_args(fc.name, dict(fc.args or {}))
+            ok, out = run_tool(a, fc.name, args)
+            result.tool_calls.append(ToolCall(fc.name, args, ok, out))
+            payload = {"result": json.loads(out)} if ok else json.loads(out)   # {"error": ...}
+            parts.append(types.Part(function_response=types.FunctionResponse(
+                id=fc.id, name=fc.name, response=payload)))
+        contents.append(types.Content(role="user", parts=parts))
 
     result.answer = "查詢步驟過多，已停止。請把問題拆小一點再問。"
     result.stop_reason = "max_tool_rounds"

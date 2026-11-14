@@ -93,13 +93,13 @@ class ChatResponse(BaseModel):
     tool_calls: list[ChatToolCall] = Field(description="Every tool the model called, in order")
     data_source: str
     data_note: str
-    served_by: str = Field(description="Model that produced the answer (differs if a fallback ran)")
+    served_by: str = Field(description="Model version that produced the answer")
 
 
 # ---------------------------------------------------------------- the app
 
 def create_app(artifacts_dir: str | Path | None = None, llm_client=None) -> FastAPI:
-    """`llm_client` lets tests inject a fake Anthropic client for /chat."""
+    """`llm_client` lets tests inject a fake Gemini client for /chat."""
     folder = Path(artifacts_dir or os.environ.get(ARTIFACTS_ENV) or ROOT / "artifacts")
 
     @asynccontextmanager
@@ -157,8 +157,8 @@ def create_app(artifacts_dir: str | Path | None = None, llm_client=None) -> Fast
 
     @app.post("/chat", response_model=ChatResponse)
     async def chat(req: ChatRequest, request: Request):
-        """FR-11: natural-language question -> Claude calls the tools above -> answer.
-        503 when no Anthropic credentials are configured; the rest of the API is unaffected."""
+        """FR-11: natural-language question -> Gemini calls the tools above -> answer.
+        503 when no Gemini API key is configured; the rest of the API is unaffected."""
         from .assistant import AssistantUnavailable, ask     # imported lazily: optional feature
         a = art(request)
         try:
