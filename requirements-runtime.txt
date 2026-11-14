@@ -11,3 +11,4 @@ fastapi==0.162.2
 pydantic==2.14.3
 starlette==1.10.0
 uvicorn==0.54.0
+anthropic==2.8.0      # /chat (LLM assistant); the rest of the app runs without a key

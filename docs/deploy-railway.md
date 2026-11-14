@@ -12,7 +12,7 @@
 - **單一服務**：FastAPI 同時提供 API 與 `static/index.html`，不需要分開部署前端，也就不用處理 CORS。
 - **不需要資料庫服務**：MVP 用檔案，不必新增 PostgreSQL（避免多餘費用與設定）。
 - **展示用資料是合成資料**：真實 M5 檔案很大且來自 Kaggle，不放進 Repo。部署版在建置時產生合成資料並跑實驗，頁面與 API 都會標示 `data_source: synthetic`。
-- **不需要任何密鑰**：MVP 沒有外部 API Key。若之後加入 LLM，金鑰只放 Railway Variables，不進 Repo。
+- **密鑰只有一個且可選**：`ANTHROPIC_API_KEY` 只用於 `/chat`（LLM 助理），放在 Railway Variables，不進 Repo。沒設時 `/chat` 回 503，其餘功能正常。公開網址上的 `/chat` 每次呼叫都會花費 API 額度，Demo 結束後建議移除這個變數。
 
 ## 步驟（對應指南 4.3）
 

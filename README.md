@@ -39,7 +39,7 @@ ReplenishAI 提供一頁看板：選擇門市與品項 → 看 28 天預測 → 
 | 1. 預測誤差優於季節性 naive | 合成資料上達成（0.678 vs 0.961）；真實 M5 未測 |
 | 2. 總成本優於移動平均基準 | 合成資料上達成（−19.6%）；真實 M5 未測 |
 | 3. API 本機與雲端可操作，p95 < 1 秒 | 本機與 Docker 可操作，本機 p95 ≈ 5 ms；雲端尚未部署 |
-| 4. LLM 工具呼叫正確率 ≥ 80% | 未開始（LLM 助理尚未排入時程） |
+| 4. LLM 工具呼叫正確率 ≥ 80% | 助理與 30 題評測集已完成；**尚未用真實模型跑評測**（需 API key），所以還不能宣稱達成 |
 | 5. Demo、Repo、測試紀錄 | Repo 與測試紀錄已有；Demo 網址或影片尚未完成 |
 
 ## 怎麼做的
@@ -85,7 +85,7 @@ docker compose up --build                 # 建置時會跑實驗；開 http://l
 ### 測試
 
 ```bash
-pytest -q                                 # 48 項；API 測試會用 artifacts 重算並比對 API 回傳的數字
+pytest -q                                 # 65 項；API 測試會用 artifacts 重算並比對 API 回傳的數字
 python scripts/check_dashboard.py http://127.0.0.1:8000 docs/evidence   # 瀏覽器實測頁面（需 pip install playwright 與 Edge）
 ```
 
@@ -100,6 +100,7 @@ python scripts/check_dashboard.py http://127.0.0.1:8000 docs/evidence   # 瀏覽
 | GET | `/forecast?item_id=&store_id=` | 單一品項 28 天 LightGBM 預測與實際值（回測） |
 | POST | `/replenish` | 再訂購點、安全庫存、建議訂購量；交期限 1–28 天、服務水準 0.5–0.999，超出範圍回 422，查無品項回 404 |
 | GET | `/compare` | 各方法的誤差、成本與敏感度分析 |
+| POST | `/chat` | 用自然語言提問，LLM 助理呼叫上面的工具回答；未設定 `ANTHROPIC_API_KEY` 時回 503 |
 
 範例：
 
@@ -108,6 +109,18 @@ curl -X POST http://127.0.0.1:8000/replenish -H "Content-Type: application/json"
   -d '{"item_id":"FOODS_1_001","store_id":"CA_1","on_hand":3,"lead_time_days":7,"service_level":0.95,"moq":0}'
 ```
 
+## LLM 補貨助理
+
+頁面最下方可以直接問，例如「FOODS_1_003 在 CA_1 庫存 15、交期 7 天；交期延長 3 天會多訂多少？」。
+
+- **不讓模型猜數字**：Claude（`claude-opus-5-5`）只能透過 4 個工具取得數字：查門市與品項、查預測、算補貨、比較方法。這些工具和 REST API 共用 `replenishai/service.py`，所以助理說的數字和看板一致。
+- **範圍限制**：查無品項、交期超出 1–28 天、沒給庫存時，助理會照實說明或反問，不會換參數硬算；天氣、下單這類請求會拒絕。每次只回答一題，不記得前一題。
+- **啟用**：設定環境變數 `ANTHROPIC_API_KEY`（不要寫進 Repo）。沒設定時 `/chat` 回 503，其他功能照常。
+- **評測**：`eval/assistant_cases.json` 有 30 題（查詢 10、模擬 14、拒答/澄清 6）。`python scripts/eval_assistant.py` 會實際呼叫模型並評分：
+  - 工具呼叫是否正確：工具、參數，以及不該成功的呼叫有沒有被擋下
+  - 回答裡的數字能否對應到工具輸出
+  
+  結果寫入 `docs/assistant-eval.md`。每題 2–4 次模型呼叫，跑完會印出實際 token 數與估算費用。**目前還沒跑過。**
 ## 換成真實 M5 資料
 
 1. 從 Kaggle 的 [M5 Forecasting - Accuracy](https://www.kaggle.com/competitions/m5-forecasting-accuracy/data) 下載 `calendar.csv`、`sales_train_evaluation.csv`、`sell_prices.csv`（需登入並同意競賽規則；檔案很大，不放進 Repo）。
@@ -122,7 +135,7 @@ curl -X POST http://127.0.0.1:8000/replenish -H "Content-Type: application/json"
 - 成本參數是假設值；沒有考慮訂購成本、在途量（MVP 視為 0）與供應商限制。
 - σ 取訓練期最後 56 天的日銷量標準差，屬簡化設定。
 - `/forecast` 回傳的是最後 28 天的回測預測，不是真正的未來預測。
-- 尚未雲端部署；LLM 查詢助理尚未實作。
+- 尚未雲端部署；LLM 助理的真實模型評測尚未執行（需要 API key）。部署到公開網址時，任何人使用 `/chat` 都會花費 API 額度。
 
 ## 文件
 

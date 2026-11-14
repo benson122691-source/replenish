@@ -57,6 +57,13 @@
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; margin-top: 10px; }
   .kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
   .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .chat-row { display: flex; gap: 8px; margin-top: 4px; }
+  .chat-row input { flex: 1; min-width: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chips button { font-size: 12px; padding: 4px 10px; }
+  .answer { white-space: pre-wrap; line-height: 1.6; margin-top: 12px; }
+  .tools { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .tools code { background: var(--best); padding: 1px 5px; border-radius: 4px; }
   .table-wrap { overflow-x: auto; }
   table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
   th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
@@ -101,6 +108,21 @@
   <section class="card">
     <h2>預測方法成本比較 <span id="cmp-tag"></span></h2>
     <div id="compare"><div class="state">載入中…</div></div>
+  </section>
+
+  <section class="card">
+    <h2>問問補貨助理 <span class="tag">LLM</span></h2>
+    <form id="chat-form" novalidate>
+      <label for="chat-q">用一句話問，例如品項、門市、庫存與交期</label>
+      <div class="chat-row">
+        <input id="chat-q" type="text" maxlength="500" autocomplete="off"
+               placeholder="FOODS_1_003 在 CA_1 庫存 15、交期 7 天；交期延長 3 天會多訂多少？">
+        <button id="chat-go" type="submit">詢問</button>
+      </div>
+      <div class="chips" id="chat-examples"></div>
+    </form>
+    <div id="chat-out" aria-live="polite"></div>
+    <p class="note">助理用 Claude 呼叫上方同一組 API 取得數字，不自行估算；每次只回答一個問題，不記得前一題。需要伺服器設定 ANTHROPIC_API_KEY。</p>
   </section>
 </main>
 
@@ -326,6 +348,37 @@ FIELDS.forEach((k) => $(k).addEventListener("input", () => setErr($(k), "")));
 $("status").textContent = "載入品項清單…";
 loadSeries().then(restoreForm);
 loadCompare();
+
+// ---------------------------------------------------------------- LLM assistant (POST /chat)
+
+const TOOL_NAMES = { list_series: "查門市與品項", get_forecast: "查預測", compute_replenishment: "算補貨",
+                     compare_strategies: "比較方法" };
+const EXAMPLES = ["FOODS_1_001 在 CA_1 庫存 10 件、交期 7 天要訂多少？",
+                  "FOODS_1_003 在 CA_1 庫存 15、交期 7 天；交期延長 3 天會多訂多少？",
+                  "哪個預測方法總成本最低？"];
+$("chat-examples").innerHTML = EXAMPLES.map((q) => `<button type="button" class="secondary">${esc(q)}</button>`).join("");
+$("chat-examples").querySelectorAll("button").forEach((b, i) => { b.onclick = () => { $("chat-q").value = EXAMPLES[i]; askChat(); }; });
+
+async function askChat() {
+  const q = $("chat-q").value.trim();
+  if (!q) { $("chat-out").innerHTML = `<p class="note">請先輸入問題。</p>`; return; }
+  $("chat-go").disabled = true;
+  $("chat-out").innerHTML = `<div class="state">助理查詢中…（通常 5–20 秒）</div>`;
+  try {
+    const d = await api("/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+                                   body: JSON.stringify({ question: q }) });
+    const tools = d.tool_calls.map((t) =>
+      `<code>${esc(TOOL_NAMES[t.name] || t.name)}${t.ok ? "" : "（錯誤）"}</code>`).join(" → ");
+    $("chat-out").innerHTML = `<div class="answer">${esc(d.answer)}</div>` +
+      `<div class="tools">呼叫的工具：${tools || "（沒有呼叫工具）"}　・　模型 ${esc(d.served_by)}</div>` +
+      (d.data_source === "synthetic" ? `<p class="note">${esc(d.data_note)}</p>` : "");
+  } catch (e) {
+    errorBox($("chat-out"), e.message, askChat);
+  } finally {
+    $("chat-go").disabled = false;
+  }
+}
+$("chat-form").addEventListener("submit", (ev) => { ev.preventDefault(); askChat(); });
 </script>
 </body>
 </html>

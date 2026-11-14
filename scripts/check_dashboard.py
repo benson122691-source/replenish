@@ -81,6 +81,31 @@ with sync_playwright() as p:
     mob.screenshot(path=str(OUT / "tc18-mobile.png"), full_page=True)
 
     check("no console / page errors", not errors, "; ".join(errors)[:300])
+
+    # LLM assistant box. (a) whatever the real server says (503 without a key) must render, not crash
+    page.goto(BASE + "/")
+    page.wait_for_selector("#go:not([disabled])", timeout=15000)
+    page.fill("#chat-q", "哪個預測方法總成本最低？")
+    page.click("#chat-go")
+    page.wait_for_function("!document.querySelector('#chat-out .state')", timeout=120000)
+    out = page.inner_text("#chat-out")
+    real_ok = page.locator("#chat-out .answer").count() == 1
+    check("chat: real /chat renders an answer or a clear error",
+          real_ok or ("503" in out and "LLM 助理目前無法使用" in out), out.replace("\n", " ")[:120])
+    if not real_ok:
+        page.screenshot(path=str(OUT / "chat-no-key.png"), full_page=False, clip=None)
+    # (b) a canned 200 reply (route-mocked) renders answer + tool list
+    canned = {"answer": "建議訂 21 件。\n（目前是合成資料）", "served_by": "claude-opus-5-5",
+              "data_source": "synthetic", "data_note": "合成資料",
+              "tool_calls": [{"name": "compute_replenishment", "input": {}, "ok": True}]}
+    page.route("**/chat", lambda r: r.fulfill(status=200, content_type="application/json",
+                                              body=__import__("json").dumps(canned, ensure_ascii=False)))
+    page.locator("#chat-examples button").first.click()
+    page.wait_for_selector("#chat-out .answer", timeout=15000)
+    check("chat: example chip asks and renders answer + tools",
+          "建議訂 21 件" in page.inner_text("#chat-out .answer") and "算補貨" in page.inner_text("#chat-out .tools"))
+    page.locator("#chat-out").scroll_into_view_if_needed()
+    page.screenshot(path=str(OUT / "chat-mocked.png"), full_page=True)
     browser.close()
 
 print(f"{sum(results)}/{len(results)} checks passed")

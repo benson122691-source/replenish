@@ -16,7 +16,7 @@
 | FR-8 | `POST /replenish`：回傳補貨點與補貨量，並驗證輸入 | US-2 | 已實作（M3） |
 | FR-9 | `GET /compare`：回傳策略成本比較與資料來源標示 | US-3 | 已實作（M3） |
 | FR-10 | HTML 頁面呼叫上述 API 並顯示圖表與建議 | US-1~3 | 已實作（M4，`static/index.html`，由 `GET /` 提供；另加 `GET /series` 填選單） |
-| FR-11（加分） | LLM 助理以工具呼叫查詢 API，不自行編造數字 | G4 | 未排定 |
+| FR-11（加分） | LLM 助理以工具呼叫查詢 API，不自行編造數字 | G4 | 已實作（2026-11-14，`replenishai/assistant.py`、`POST /chat`、頁面問答區）；工具與 API 共用 `replenishai/service.py`；未設定 API key 時回 503，其餘功能不受影響。實際模型評測（M-4）待執行 |
 
 ## 2. 邊界規則
 
