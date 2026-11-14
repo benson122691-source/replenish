@@ -86,7 +86,10 @@ docker compose up --build                 # 建置時會跑實驗；開 http://l
 
 ```bash
 pytest -q                                 # 48 項；API 測試會用 artifacts 重算並比對 API 回傳的數字
+python scripts/check_dashboard.py http://127.0.0.1:8000 docs/evidence   # 瀏覽器實測頁面（需 pip install playwright 與 Edge）
 ```
+
+![看板截圖（合成資料）](docs/evidence/tc18-desktop.png)
 
 ## API
 

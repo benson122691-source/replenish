@@ -8,5 +8,6 @@ uvicorn
 sqlalchemy
 httpx
 pytest
+playwright          # scripts/check_dashboard.py only (uses the installed Edge, no browser download)
 tabulate
 scipy

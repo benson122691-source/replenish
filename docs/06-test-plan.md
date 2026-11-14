@@ -21,11 +21,11 @@
 | TC-15 | FR-8、BR-4 | 服務水準 = 1.2 或庫存 = −5 | 422 | 通過（`test_replenish_rejects_invalid_input`：另含 SL=0.4、交期 0/29、MOQ=−1） |
 | TC-16 | FR-8 | 正常補貨請求 | 200，含補貨點與補貨量 | 通過（`test_replenish_matches_policy_formula`：以 artifacts 獨立重算 ROP 與補貨量並比對；另有庫存充足=0、MOQ 測試） |
 | TC-17 | FR-9、NFR-5 | /compare 含 data_source | 欄位存在 | 通過（`test_compare_returns_artifact_numbers_and_data_source`：每個數字等於 artifacts/results.json；`test_synthetic_results_are_labelled`） |
-| TC-18 | FR-10 | 無痕視窗開頁、選品項、看到圖與建議、重新整理後正常 | 可操作 | 部分：`test_index_serves_dashboard_page`、`test_series_lists_every_pair_in_artifacts` 通過；本機 curl 驗證頁面用到的 4 個端點皆回 200/422（2026-11-10）。**瀏覽器實際操作與截圖尚未執行** |
+| TC-18 | FR-10 | 無痕視窗開頁、選品項、看到圖與建議、重新整理後正常 | 可操作 | 通過（2026-11-14）：`scripts/check_dashboard.py` 以 Playwright 驅動本機 Edge（無頭、全新 context，等同無痕）實際操作頁面，10/10 項通過：選單由 `/series` 載入、6 種方法與 bootstrap 表顯示、合成資料標示、改選品項與輸入後出現預測圖與補貨建議、交期 40 顯示欄位錯誤、重新整理後正常、390px 寬無橫向捲動、無 console 錯誤（修正前 favicon 404，已加內嵌 icon）。截圖：`docs/evidence/tc18-desktop.png`、`tc18-mobile.png`、`tc18-invalid-input.png` |
 | TC-19 | NFR-1 | 同設定重跑兩次 | 指標一致 | 通過（`test_lgbm_is_reproducible`；僅測 LightGBM 預測） |
 | TC-20 | NFR-3 | 單品項預測 API p95 | < 1 秒 | 部分：本機 uvicorn、同一品項連續 200 次 GET /forecast，p95 ≈ 5 ms（2026-11-09，手動量測，非自動測試）；雲端未測 |
-| TC-21 | NFR-4 | 提交前搜尋 Repo 的金鑰與 .env | 無 | 通過（2026-11-10）：對所有追蹤檔搜尋 api_key/secret/token/password/ghp_/sk-/AKIA/私鑰標頭，無結果；無 .env；commit 作者信箱為 noreply@example.com |
-| TC-22 | NFR-6 | `docker compose up` 後可開頁面 | 成功 | 通過（2026-11-10，本機 Docker 29.9.2）：`docker compose build` 約 2 分鐘（映像 879MB），建置時跑實驗的成本數字與本機一致；`docker compose up` 後 `/`、`/series`、`/forecast`、`/compare`、`/replenish` 皆 200，錯誤輸入 422、未知品項 404，healthcheck 為 healthy；設 `PORT=9000` 時改聽 9000。頁面的瀏覽器操作見 TC-18 |
+| TC-21 | NFR-4 | 提交前搜尋 Repo 的金鑰與 .env | 無 | 通過（2026-11-10）：對所有追蹤檔搜尋 api_key/secret/token/password/ghp_/sk-/AKIA/私鑰標頭，無結果；無 .env；commit 作者信箱為 noreply@example.com。**2026-11-14 複查：`b74ec23`、`493b67a`、`78e970c`、`02eadb9` 的作者信箱是個人信箱，且已推上 GitHub，本項目前不符合**，待決定是否改寫歷史 |
+| TC-22 | NFR-6 | `docker compose up` 後可開頁面 | 成功 | 通過（2026-11-10，本機 Docker 29.9.2）：`docker compose build` 約 2 分鐘（映像 879MB），建置時跑實驗的成本數字與本機一致；`docker compose up` 後 `/`、`/series`、`/forecast`、`/compare`、`/replenish` 皆 200，錯誤輸入 422、未知品項 404，healthcheck 為 healthy；設 `PORT=9000` 時改聽 9000。頁面的瀏覽器操作見 TC-18。**注意**：2026-11-14 Dockerfile 改為固定版本 `requirements-runtime.txt`、非 root、HEALTHCHECK，修改後只在乾淨 venv 模擬建置步驟（通過），尚未重跑 `docker compose build`，部署前需重跑本案例 |
 
 ## 執行方式
 
