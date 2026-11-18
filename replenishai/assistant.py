@@ -4,10 +4,14 @@ CALLING TOOLS over the experiment artifacts, never by guessing numbers.
 - Tools are thin wrappers over replenishai.service, the same functions the REST API uses, so the
   assistant cannot report a number the API/dashboard would not report for the same inputs.
 - One question per call (no chat memory): every answer can be checked on its own, which is what
-  the 30-case evaluation (scripts/eval_assistant.py) needs.
+  the evaluation set (scripts/eval_assistant.py) needs.
 - Needs a Gemini API key (GEMINI_API_KEY, or GOOGLE_API_KEY). Without it `ask` raises
   AssistantUnavailable and the API answers 503; the rest of the app keeps working.
 - Model: GEMINI_MODEL env var, default below (has a free tier on the Gemini Developer API).
+- FR-12: a fifth tool, search_docs, answers questions about the project itself (method,
+  assumptions, design, tests, deployment) from the repo's markdown docs (replenishai/rag.py, a
+  port of langchain-ai/rag-research-agent-template). The template's router / research plan /
+  respond nodes become rules in SYSTEM_PROMPT; this loop already runs a multi-step plan.
 """
 from __future__ import annotations
 
@@ -20,7 +24,7 @@ import httpx
 from google import genai
 from google.genai import errors, types
 
-from . import service
+from . import rag, service
 from .service import Artifacts, UnknownSeries
 
 DEFAULT_MODEL = "gemini-3.8-flash"
@@ -41,8 +45,15 @@ SYSTEM_PROMPT = """你是 ReplenishAI 的補貨查詢助理，服務對象是零
 - 使用者沒給目前庫存時，不要假設數值，先請他提供。服務水準沒提到用 0.95，MOQ 沒提到用 0。
 - 工具回傳錯誤（例如查無品項、交期超出 1–28 天）時，照實告訴使用者錯在哪裡，不要改用別的品項或參數硬算。
 
+專案文件（search_docs）：
+- 問題是關於這個專案本身——方法、模型選擇、成本假設、防資料洩漏、限制、測試、部署、成功標準——呼叫 search_docs 查專案文件。
+- 先想清楚要查哪些面向，queries 一次給 1–3 個用詞不同的查詢（可混用中英文關鍵字，例如「資料洩漏 lag 位移」與「leakage」）。結果不夠回答時，換個角度再查，整題最多查 3 次。
+- 根據文件回答時，只能用 search_docs 回傳的段落內容，並在句末用［檔名 § 章節］標出處；段落沒寫到的就說文件沒有提到，不要用一般知識補。
+- 問題同時要數字和原因時（例如「某方法的成本差多少？為什麼？」），數字用 compare_strategies 等資料工具查，原因用 search_docs 查。
+- 問的是品項、門市、庫存或補貨數量時，不要用 search_docs 代替資料工具。
+
 範圍限制：
-- 你只回答這份資料裡的預測、補貨建議與方法比較。天氣、股價、其他公司、一般閒聊等，簡短說明你無法回答，並說你能做什麼。
+- 你只回答這份資料裡的預測、補貨建議、方法比較，以及專案文件涵蓋的內容。天氣、股價、其他公司、一般閒聊等，簡短說明你無法回答，並說你能做什麼。
 - 你不能下單、聯絡供應商或修改任何資料；被要求執行這類動作時，說明你只能提供建議。
 
 資料提醒：工具結果裡的 data_source 若是 synthetic，回答時要提一句「目前是合成資料，不代表真實零售表現」。成本參數是假設值。"""
@@ -77,6 +88,12 @@ TOOLS = [
           "取得各預測方法（季節性 naive、28 天移動平均、TSB、LightGBM、LightGBM 分位數、完美預測）"
           "的總成本、持有/缺貨成本、滿足率、預測誤差，以及相對 28 天移動平均的成本差異與 95% 信賴區間。",
           {}, []),
+    _tool("search_docs",
+          "搜尋本專案的文件（README、project-brief、PRD/SRS/SAD/SDS、測試計畫、實驗結果、部署計畫、開發手記），"
+          "回傳最相關的段落與出處。用於方法、假設、設計理由、限制、測試與部署等問題；不提供品項層級的數字。",
+          {"queries": {"type": "array", "items": {"type": "string"},
+                       "description": f"1–{rag.MAX_QUERIES} 個用詞不同的搜尋查詢，各不超過 {rag.MAX_QUERY_CHARS} 字"}},
+          ["queries"]),
 ]
 
 
@@ -96,6 +113,7 @@ def _handlers(a: Artifacts) -> dict[str, Callable[..., dict]]:
         "get_forecast": lambda item_id, store_id: _forecast_summary(a, item_id, store_id),
         "compute_replenishment": lambda **kw: service.replenish_data(a, **kw),
         "compare_strategies": lambda: service.compare_data(a),
+        "search_docs": lambda queries: rag.search(queries),
     }
 
 
@@ -139,6 +157,20 @@ class ChatResult:
     served_by: str = MODEL
     input_tokens: int = 0
     output_tokens: int = 0
+
+    @property
+    def sources(self) -> list[dict]:
+        """Document passages search_docs returned, deduplicated, in first-seen order."""
+        seen, out = set(), []
+        for c in self.tool_calls:
+            if c.name != "search_docs" or not c.ok:
+                continue
+            for h in json.loads(c.output).get("hits", []):
+                key = (h["source"], h["section"])
+                if key not in seen:
+                    seen.add(key)
+                    out.append({"source": h["source"], "section": h["section"]})
+        return out
 
 
 _SCHEMAS = {t["name"]: t["parameters"]["properties"] for t in TOOLS}
@@ -223,13 +255,13 @@ def ask(question: str, a: Artifacts, client: Any | None = None, model: str | Non
         feedback = getattr(resp, "prompt_feedback", None)
         if not resp.candidates or (feedback and feedback.block_reason):
             result.stop_reason = "blocked"
-            result.answer = "這個問題我無法回答。我可以查詢品項預測、計算補貨建議，或比較各預測方法的成本。"
+            result.answer = "這個問題我無法回答。我可以查詢品項預測、計算補貨建議、比較各預測方法的成本，或查專案文件。"
             return result
         cand = resp.candidates[0]
         reason = getattr(cand.finish_reason, "value", str(cand.finish_reason or ""))
         result.stop_reason = reason
         if reason in BLOCKED:
-            result.answer = "這個問題我無法回答。我可以查詢品項預測、計算補貨建議，或比較各預測方法的成本。"
+            result.answer = "這個問題我無法回答。我可以查詢品項預測、計算補貨建議、比較各預測方法的成本，或查專案文件。"
             return result
 
         calls = resp.function_calls or []

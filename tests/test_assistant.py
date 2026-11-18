@@ -157,6 +157,28 @@ def test_forecast_tool_adds_totals(art):
     assert d["total_pred_first_7d"] == pytest.approx(sum(p["pred"] for p in d["forecast"][:7]), abs=0.01)
 
 
+def test_search_docs_tool_and_sources(art):
+    q = {"queries": ["資料洩漏", "lag 位移 28 天"]}
+    fake = FakeClient(reply("STOP", tool_use("t1", "search_docs", q)),
+                      reply("STOP", text("lag 至少位移 28 天是為了防止資料洩漏［README.md § 怎麼做的］。")))
+    res = assistant.ask("為什麼 lag 要位移 28 天？", art, client=fake)
+    [call] = res.tool_calls
+    assert call.ok and call.name == "search_docs"
+    out = json.loads(call.output)
+    assert out["queries"] == q["queries"] and 0 < len(out["hits"]) <= 4
+    [sent] = last_responses(fake.requests[1])
+    assert sent.response["result"]["hits"] == out["hits"]                  # passages went back
+    assert res.sources and all(set(s) == {"source", "section"} for s in res.sources)
+    assert len({(s["source"], s["section"]) for s in res.sources}) == len(res.sources)
+
+
+def test_search_docs_bad_queries_are_relayed(art):
+    ok, out = assistant.run_tool(art, "search_docs", {"queries": []})
+    assert not ok and "queries" in json.loads(out)["error"]
+    ok, out = assistant.run_tool(art, "search_docs", {"queries": "資料洩漏"})
+    assert not ok and "list" in json.loads(out)["error"]
+
+
 # ---------------------------------------------------------------- /chat endpoint
 
 def test_chat_endpoint_with_fake_model():
@@ -169,6 +191,16 @@ def test_chat_endpoint_with_fake_model():
     assert body["answer"] == "LightGBM 分位數成本最低。"
     assert body["tool_calls"] == [{"name": "compare_strategies", "input": {}, "ok": True}]
     assert body["data_source"] in ("synthetic", "m5")
+    assert body["sources"] == []                               # no document search in this answer
+
+
+def test_chat_endpoint_returns_doc_sources():
+    fake = FakeClient(reply("STOP", tool_use("t1", "search_docs", {"queries": ["Railway 部署"]})),
+                      reply("STOP", text("計畫部署到 Railway［docs/deploy-railway.md］。")))
+    with TestClient(create_app(ART, llm_client=fake)) as c:
+        r = c.post("/chat", json={"question": "要怎麼部署？"})
+    assert r.status_code == 200
+    assert "docs/deploy-railway.md" in {s["source"] for s in r.json()["sources"]}
 
 
 def test_chat_without_credentials_is_503(monkeypatch):
@@ -194,14 +226,16 @@ CASES = json.loads((ART.parent / "eval" / "assistant_cases.json").read_text(enco
 
 
 def test_eval_set_is_well_formed_and_feasible(art):
-    assert len(CASES) == 30 and len({c["id"] for c in CASES}) == 30
+    assert len(CASES) == 36 and len({c["id"] for c in CASES}) == 36
     cats = [c["category"] for c in CASES]
-    assert (cats.count("query"), cats.count("simulate"), cats.count("refuse")) == (10, 14, 6)
+    assert (cats.count("query"), cats.count("simulate"), cats.count("refuse")) == (10, 14, 6)  # Q5-4
+    assert cats.count("docs") == 6                                                          # FR-12
     schema = {t["name"]: t["parameters"] for t in assistant.TOOLS}
     for c in CASES:
         for exp in c["expect"]:
             assert set(exp["args"]) <= set(schema[exp["tool"]]["properties"]), c["id"]
-            full = {"service_level": 0.95, "moq": 0, **exp["args"]} if exp["tool"] == "compute_replenishment" else exp["args"]
+            full = ({"service_level": 0.95, "moq": 0, **exp["args"]} if exp["tool"] == "compute_replenishment"
+                    else {"queries": [c["question"]]} if exp["tool"] == "search_docs" else exp["args"])
             ok, out = assistant.run_tool(art, exp["tool"], full)
             assert ok, f"{c['id']}: expected call cannot succeed: {out}"     # no impossible answers
         assert set(c.get("forbid_ok", [])) <= set(schema), c["id"]

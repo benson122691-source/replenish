@@ -17,6 +17,7 @@
 | FR-9 | `GET /compare`：回傳策略成本比較與資料來源標示 | US-3 | 已實作（M3） |
 | FR-10 | HTML 頁面呼叫上述 API 並顯示圖表與建議 | US-1~3 | 已實作（M4，`static/index.html`，由 `GET /` 提供；另加 `GET /series` 填選單） |
 | FR-11（加分） | LLM 助理以工具呼叫查詢 API，不自行編造數字 | G4 | 已實作（2026-11-14，`replenishai/assistant.py`、`POST /chat`、頁面問答區）；工具與 API 共用 `replenishai/service.py`；未設定 API key 時回 503，其餘功能不受影響。實際模型評測（M-4）待執行 |
+| FR-12（加分） | LLM 助理回答專案本身的問題（方法、假設、限制、測試、部署）時，從專案文件檢索段落並標出處，不用一般知識補 | G4 | 已實作（2026-11-18，`replenishai/rag.py`、`search_docs` 工具、`/chat` 的 `sources` 欄位）；設計改寫自 langchain-ai/rag-research-agent-template，以 BM25＋RRF 取代向量庫。實際模型評測待執行 |
 
 ## 2. 邊界規則
 

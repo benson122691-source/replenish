@@ -113,7 +113,7 @@
   <section class="card">
     <h2>問問補貨助理 <span class="tag">LLM</span></h2>
     <form id="chat-form" novalidate>
-      <label for="chat-q">用一句話問，例如品項、門市、庫存與交期</label>
+      <label for="chat-q">用一句話問，例如品項、門市、庫存與交期，或專案的方法與假設</label>
       <div class="chat-row">
         <input id="chat-q" type="text" maxlength="500" autocomplete="off"
                placeholder="FOODS_1_003 在 CA_1 庫存 15、交期 7 天；交期延長 3 天會多訂多少？">
@@ -122,7 +122,7 @@
       <div class="chips" id="chat-examples"></div>
     </form>
     <div id="chat-out" aria-live="polite"></div>
-    <p class="note">助理用 Gemini 呼叫上方同一組 API 取得數字，不自行估算；每次只回答一個問題，不記得前一題。需要伺服器設定 GEMINI_API_KEY。</p>
+    <p class="note">助理用 Gemini 呼叫上方同一組 API 取得數字，不自行估算；問到專案的方法、假設或部署時，會檢索專案文件並標出處；每次只回答一個問題，不記得前一題。需要伺服器設定 GEMINI_API_KEY。</p>
   </section>
 </main>
 
@@ -352,10 +352,11 @@ loadCompare();
 // ---------------------------------------------------------------- LLM assistant (POST /chat)
 
 const TOOL_NAMES = { list_series: "查門市與品項", get_forecast: "查預測", compute_replenishment: "算補貨",
-                     compare_strategies: "比較方法" };
+                     compare_strategies: "比較方法", search_docs: "查文件" };
 const EXAMPLES = ["FOODS_1_001 在 CA_1 庫存 10 件、交期 7 天要訂多少？",
                   "FOODS_1_003 在 CA_1 庫存 15、交期 7 天；交期延長 3 天會多訂多少？",
-                  "哪個預測方法總成本最低？"];
+                  "哪個預測方法總成本最低？",
+                  "為什麼 lag 特徵至少要位移 28 天？"];
 $("chat-examples").innerHTML = EXAMPLES.map((q) => `<button type="button" class="secondary">${esc(q)}</button>`).join("");
 $("chat-examples").querySelectorAll("button").forEach((b, i) => { b.onclick = () => { $("chat-q").value = EXAMPLES[i]; askChat(); }; });
 
@@ -371,6 +372,8 @@ async function askChat() {
       `<code>${esc(TOOL_NAMES[t.name] || t.name)}${t.ok ? "" : "（錯誤）"}</code>`).join(" → ");
     $("chat-out").innerHTML = `<div class="answer">${esc(d.answer)}</div>` +
       `<div class="tools">呼叫的工具：${tools || "（沒有呼叫工具）"}　・　模型 ${esc(d.served_by)}</div>` +
+      ((d.sources || []).length ? `<div class="tools">檢索到的文件：${d.sources.map((s) =>
+        `<code>${esc(s.source)} § ${esc(s.section.split(" > ").pop())}</code>`).join(" ")}</div>` : "") +
       (d.data_source === "synthetic" ? `<p class="note">${esc(d.data_note)}</p>` : "");
   } catch (e) {
     errorBox($("chat-out"), e.message, askChat);
