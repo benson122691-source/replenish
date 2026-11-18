@@ -21,6 +21,8 @@ COPY replenishai/ replenishai/
 COPY scripts/run_experiment.py scripts/
 COPY static/ static/
 COPY docs/ docs/
+# search_docs (FR-12) also indexes these two
+COPY README.md project-brief.md ./
 
 # No data/raw in the image -> run_experiment.py generates synthetic M5-format data (data_source: synthetic)
 RUN python scripts/run_experiment.py \

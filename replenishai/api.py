@@ -88,9 +88,16 @@ class ChatToolCall(BaseModel):
     ok: bool
 
 
+class ChatSource(BaseModel):
+    source: str = Field(description="Document path in the repo, e.g. docs/04-sad.md")
+    section: str = Field(description="Heading path of the passage")
+
+
 class ChatResponse(BaseModel):
     answer: str
     tool_calls: list[ChatToolCall] = Field(description="Every tool the model called, in order")
+    sources: list[ChatSource] = Field(default_factory=list,
+                                      description="FR-12: document passages search_docs retrieved")
     data_source: str
     data_note: str
     served_by: str = Field(description="Model version that produced the answer")
@@ -158,6 +165,7 @@ def create_app(artifacts_dir: str | Path | None = None, llm_client=None) -> Fast
     @app.post("/chat", response_model=ChatResponse)
     async def chat(req: ChatRequest, request: Request):
         """FR-11: natural-language question -> Gemini calls the tools above -> answer.
+        FR-12: questions about the project itself are answered from its docs (search_docs).
         503 when no Gemini API key is configured; the rest of the API is unaffected."""
         from .assistant import AssistantUnavailable, ask     # imported lazily: optional feature
         a = art(request)
@@ -168,6 +176,7 @@ def create_app(artifacts_dir: str | Path | None = None, llm_client=None) -> Fast
         except ValueError as e:
             raise HTTPException(422, str(e))
         return {"answer": res.answer, "served_by": res.served_by, **service.source_fields(a),
+                "sources": res.sources,
                 "tool_calls": [{"name": c.name, "input": c.input, "ok": c.ok} for c in res.tool_calls]}
 
     return app

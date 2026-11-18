@@ -1,5 +1,5 @@
 {
-  "_doc": "30-case evaluation set for the LLM assistant (project-brief Q5-4: tool-call accuracy >= 80%). expect = calls that must appear (args are a subset match; numbers compared exactly). forbid_ok = tools that must NOT be called successfully. answer_any = at least one of these strings must appear in the answer. Graded by scripts/eval_assistant.py.",
+  "_doc": "Evaluation set for the LLM assistant: 30 cases for project-brief Q5-4 (query 10, simulate 14, refuse 6; tool-call accuracy >= 80%) plus 6 docs cases for FR-12 (answers from the project docs via search_docs; reported separately). expect = calls that must appear (args are a subset match; numbers compared exactly). forbid_ok = tools that must NOT be called successfully. answer_any = at least one of these strings must appear in the answer. Graded by scripts/eval_assistant.py.",
   "cases": [
     {"id": "q01", "category": "query", "question": "FOODS_1_001 在 CA_1 未來 28 天預測總共會賣幾件？",
      "expect": [{"tool": "get_forecast", "args": {"item_id": "FOODS_1_001", "store_id": "CA_1"}}]},
@@ -66,6 +66,18 @@
     {"id": "r05", "category": "refuse", "question": "明天台北會下雨嗎？",
      "expect": [], "forbid_ok": ["compute_replenishment", "get_forecast"], "answer_any": ["無法", "不能", "沒辦法", "不提供"]},
     {"id": "r06", "category": "refuse", "question": "幫我直接向供應商下單 FOODS_1_001 50 件，送到 CA_1。",
-     "expect": [], "forbid_ok": [], "answer_any": ["無法", "不能", "沒辦法", "只能提供"]}
+     "expect": [], "forbid_ok": [], "answer_any": ["無法", "不能", "沒辦法", "只能提供"]},
+    {"id": "d01", "category": "docs", "question": "為什麼 lag 和滾動特徵至少要位移 28 天？",
+     "expect": [{"tool": "search_docs", "args": {}}], "answer_any": ["洩漏", "leak"]},
+    {"id": "d02", "category": "docs", "question": "持有成本和缺貨成本的參數是真實數字嗎？",
+     "expect": [{"tool": "search_docs", "args": {}}], "answer_any": ["假設"]},
+    {"id": "d03", "category": "docs", "question": "LightGBM 為什麼用 Poisson 目標？",
+     "expect": [{"tool": "search_docs", "args": {}}], "answer_any": ["非負", "計數"]},
+    {"id": "d04", "category": "docs", "question": "這個專案打算怎麼部署到雲端？",
+     "expect": [{"tool": "search_docs", "args": {}}], "answer_any": ["Railway"]},
+    {"id": "d05", "category": "docs", "question": "TSB 的總成本比 28 天移動平均高多少？文件怎麼解釋原因？",
+     "expect": [{"tool": "compare_strategies", "args": {}}, {"tool": "search_docs", "args": {}}], "answer_any": ["間歇", "零值"]},
+    {"id": "d06", "category": "docs", "question": "LightGBM 分位數策略的總成本是多少？文件說這個結果有什麼要注意的？",
+     "expect": [{"tool": "compare_strategies", "args": {}}, {"tool": "search_docs", "args": {}}], "answer_any": ["合成", "真實資料", "驗證"]}
   ]
 }

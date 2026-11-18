@@ -21,6 +21,10 @@
                           │
                           ▼
                   [static/index.html 儀表板]    FR-10
+                          │
+                  [assistant.py Gemini 工具迴圈]  POST /chat     FR-11
+                     ├─ 資料工具 → service.py（與 API 共用）
+                     └─ search_docs → rag.py（README、docs/*.md 的 BM25 索引）  FR-12
 ```
 
 ## 2. 資料流
